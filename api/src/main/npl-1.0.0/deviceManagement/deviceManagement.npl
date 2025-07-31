@@ -1,0 +1,158 @@
+package deviceManagement
+
+/**
+ * Represents a device in the system.
+ * @param id Unique identifier for the device.
+ * @param name Name of the device.
+ * @param type Type/category of the device.
+ * @param tenantId Tenant that owns the device.
+ * @param customerId Customer that owns the device (optional).
+ * @param credentials Device credentials (e.g., access token).
+ * @param label Optional label for visualization.
+ * @param deviceProfileId The device profile identifier.
+ * @param firmwareId The firmware OTA package identifier.
+ * @param softwareId The software OTA package identifier.
+ * @param externalId An external device identifier.
+ * @param version Version number of the device.
+ * @param additionalInfo Additional information as JSON string.
+ * @param createdTime Timestamp when the device was created.
+ * @param deviceData Device-specific configuration data.
+ */
+struct Device {
+    id: Text,
+    name: Text,
+    type: Text,
+    tenantId: Text,
+    customerId: Optional<Text>,
+    credentials: Text,
+    label: Optional<Text>,
+    deviceProfileId: Optional<Text>,
+    firmwareId: Optional<Text>,
+    softwareId: Optional<Text>,
+    externalId: Optional<Text>,
+    version: Optional<Number>,
+    additionalInfo: Optional<Text>,
+    createdTime: Optional<Number>,
+    deviceData: Optional<Text>
+};
+
+/**
+ * Notification for device creation/update
+ * @param device The device that was saved
+ */
+notification deviceSaved(device: Device) returns Unit;
+
+/**
+ * Notification for device deletion
+ * @param deviceId The ID of the device that was deleted
+ */
+notification deviceDeleted(deviceId: Text) returns Unit;
+
+/**
+ * Notification for device assignment to customer
+ * @param deviceId The device ID
+ * @param customerId The customer ID
+ */
+notification deviceAssigned(deviceId: Text, customerId: Text) returns Unit;
+
+/**
+ * Notification for device unassignment from customer
+ * @param deviceId The device ID
+ */
+notification deviceUnassigned(deviceId: Text) returns Unit;
+
+/**
+ * Device management protocol for CRUD and assignment operations.
+ * Maps to ThingsBoard user roles:
+ * - sys_admin: System administrator with full access
+ * - tenant_admin: Tenant administrator with tenant-level access
+ * - customer_user: Customer user with limited access
+ */
+@api
+protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
+
+    initial state active;
+
+    /**
+     * Create or update a device. Only sys_admin and tenant_admin can perform this.
+     * @param device The device to create or update
+     * @return The created or updated device
+     */
+    @api
+    permission[sys_admin | tenant_admin] saveDevice(device: Device) returns Device | active {
+        // Implementation would save the device
+        var savedDevice = device;
+        
+        // Emit notification for device creation/update
+        notify deviceSaved(savedDevice);
+        
+        return savedDevice;
+    };
+
+    /**
+     * Get a device by ID. All roles can perform this.
+     * @param id The device ID
+     * @return The device if found
+     */
+    @api
+    permission[sys_admin | tenant_admin | customer_user] getDeviceById(id: Text) returns Device | active {
+        // Implementation would fetch the device
+        // Placeholder: return a dummy device
+        return Device(
+            id = id,
+            name = "",
+            type = "",
+            tenantId = "",
+            customerId = optionalOf<Text>(),
+            credentials = "",
+            label = optionalOf<Text>(),
+            deviceProfileId = optionalOf<Text>(),
+            firmwareId = optionalOf<Text>(),
+            softwareId = optionalOf<Text>(),
+            externalId = optionalOf<Text>(),
+            version = optionalOf<Number>(),
+            additionalInfo = optionalOf<Text>(),
+            createdTime = optionalOf<Number>(),
+            deviceData = optionalOf<Text>()
+        );
+    };
+
+    /**
+     * Delete a device. Only sys_admin and tenant_admin can perform this.
+     * @param id The device ID to delete
+     */
+    @api
+    permission[sys_admin | tenant_admin] deleteDevice(id: Text) | active {
+        // Implementation would delete the device
+        
+        // Emit notification for device deletion
+        notify deviceDeleted(id);
+    };
+
+    /**
+     * Assign a device to a customer. Only sys_admin and tenant_admin can perform this.
+     * @param deviceId The device ID
+     * @param customerId The customer ID
+     */
+    @api
+    permission[sys_admin | tenant_admin] assignDeviceToCustomer(deviceId: Text, customerId: Text) | active {
+        // Implementation would assign the device
+        
+        // Emit notification for device assignment
+        notify deviceAssigned(deviceId, customerId);
+    };
+
+    /**
+     * Unassign a device from a customer. Only sys_admin and tenant_admin can perform this.
+     * @param deviceId The device ID
+     */
+    @api
+    permission[sys_admin | tenant_admin] unassignDeviceFromCustomer(deviceId: Text) | active {
+        // Implementation would unassign the device
+        
+        // Emit notification for device unassignment
+        notify deviceUnassigned(deviceId);
+    };
+
+
+}; 

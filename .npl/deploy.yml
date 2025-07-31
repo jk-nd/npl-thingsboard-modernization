@@ -4,6 +4,6 @@ targets:
   local:
     type: engine
     engineManagementUrl: http://localhost:12400
-    authUrl: http://localhost:11000
-    username: alice
-    password: password123
+    authUrl: http://localhost:9090
+    username: tenant@thingsboard.org
+    password: tenant
