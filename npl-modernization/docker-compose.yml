@@ -1,0 +1,103 @@
+services:
+  postgres:
+    image: postgres:14.13-alpine
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_PASSWORD: welcome123
+      POSTGRES_DB: npl_engine
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+      RABBITMQ_DEFAULT_VHOST: /
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  oidc-proxy:
+    build:
+      context: ./oidc-proxy
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      THINGSBOARD_URL: http://host.docker.internal:9090
+      THINGSBOARD_JWT_SECRET: thingsboard
+    depends_on:
+      - postgres
+
+  engine:
+    image: ghcr.io/noumenadigital/images/engine:latest
+    ports:
+      - "11000:11000"
+      - "12000:12000"
+      - "12400:12400"
+      - "12700:12700"
+    environment:
+      ENGINE_DB_PASSWORD: welcome123
+      ENGINE_DEV_MODE: false
+      ENGINE_DB_URL: jdbc:postgresql://postgres:5432/npl_engine
+      ENGINE_DB_USER: postgres
+      # Use OIDC proxy service name as the issuer
+      ENGINE_ALLOWED_ISSUERS: "http://oidc-proxy:8080"
+      # JWT Claim Mapping for ThingsBoard
+      ENGINE_OIDC_SUBJECT_CLAIM: sub
+      ENGINE_OIDC_ROLES_CLAIM: scopes
+      ENGINE_OIDC_ISSUER_CLAIM: iss
+      # Production settings
+      ENGINE_MANAGEMENT_HOST: 0.0.0.0
+    depends_on:
+      - postgres
+      - oidc-proxy
+
+  sync-service:
+    build:
+      context: ./sync-service
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      # RabbitMQ Configuration
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USERNAME: admin
+      RABBITMQ_PASSWORD: admin123
+      RABBITMQ_VHOST: /
+      
+      # NPL Engine Configuration
+      NPL_ENGINE_URL: http://engine:12000
+      NPL_TOKEN: ${NPL_TOKEN:-thingsboard}
+      
+      # ThingsBoard Configuration (for future implementation)
+      THINGSBOARD_URL: http://host.docker.internal:9090
+      THINGSBOARD_USERNAME: tenant@thingsboard.org
+      THINGSBOARD_PASSWORD: tenant
+      
+      # Service Configuration
+      NODE_ENV: production
+      LOG_LEVEL: info
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      engine:
+        condition: service_started
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "dist/health.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  rabbitmq_data:

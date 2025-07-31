@@ -1,0 +1,480 @@
+package deviceManagement
+
+/**
+ * Comprehensive test suite for DeviceManagement protocol
+ * Tests all CRUD operations, permissions, and edge cases
+ */
+
+@test
+function test_device_creation_success(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    var testDevice = Device(
+        id = "test-device-001",
+        name = "Test Sensor",
+        type = "sensor",
+        tenantId = "tenant-001",
+        customerId = optionalOf<Text>(),
+        credentials = "encrypted-access-token",
+        label = optionalOf("Test Label"),
+        deviceProfileId = optionalOf("default-profile"),
+        firmwareId = optionalOf("firmware-v1.0"),
+        softwareId = optionalOf("software-v1.0"),
+        externalId = optionalOf("ext-001"),
+        version = optionalOf(1),
+        additionalInfo = optionalOf("{\"location\": \"building-a\"}"),
+        createdTime = optionalOf(1640995200000),
+        deviceData = optionalOf("{\"config\": {\"sampling_rate\": 60}}")
+    );
+    
+    var result = deviceManagement.saveDevice['sys_admin'](testDevice);
+    
+    test.assertEquals(testDevice.id, result.id, "Device ID should match");
+    test.assertEquals(testDevice.name, result.name, "Device name should match");
+    test.assertEquals(testDevice.type, result.type, "Device type should match");
+    test.assertEquals(testDevice.tenantId, result.tenantId, "Tenant ID should match");
+    test.assertEquals(testDevice.credentials, result.credentials, "Credentials should match");
+};
+
+@test
+function test_device_creation_by_tenant_admin(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    var testDevice = Device(
+        id = "tenant-device-001",
+        name = "Tenant Device",
+        type = "actuator",
+        tenantId = "tenant-001",
+        customerId = optionalOf<Text>(),
+        credentials = "tenant-credentials",
+        label = optionalOf<Text>(),
+        deviceProfileId = optionalOf<Text>(),
+        firmwareId = optionalOf<Text>(),
+        softwareId = optionalOf<Text>(),
+        externalId = optionalOf<Text>(),
+        version = optionalOf<Number>(),
+        additionalInfo = optionalOf<Text>(),
+        createdTime = optionalOf<Number>(),
+        deviceData = optionalOf<Text>()
+    );
+    
+    var result = deviceManagement.saveDevice['tenant_admin'](testDevice);
+    
+    test.assertEquals(testDevice.id, result.id, "Tenant admin should be able to create device");
+    test.assertEquals(testDevice.name, result.name, "Device name should be preserved");
+};
+
+@test
+function test_device_creation_by_customer_user_should_fail(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    var testDevice = Device(
+        id = "customer-device-001",
+        name = "Customer Device",
+        type = "sensor",
+        tenantId = "tenant-001",
+        customerId = optionalOf<Text>(),
+        credentials = "customer-credentials",
+        label = optionalOf<Text>(),
+        deviceProfileId = optionalOf<Text>(),
+        firmwareId = optionalOf<Text>(),
+        softwareId = optionalOf<Text>(),
+        externalId = optionalOf<Text>(),
+        version = optionalOf<Number>(),
+        additionalInfo = optionalOf<Text>(),
+        createdTime = optionalOf<Number>(),
+        deviceData = optionalOf<Text>()
+    );
+    
+    test.assertFails(function() -> deviceManagement.saveDevice['customer_user'](testDevice), 
+        "Customer user should not be able to create devices");
+};
+
+@test
+function test_get_device_by_id_sys_admin(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    var device = deviceManagement.getDeviceById['sys_admin']("test-device-001");
+    
+    test.assertEquals("test-device-001", device.id, "Device ID should match");
+    test.assertTrue(device.id.length() > 0, "Device should not be null");
+};
+
+@test
+function test_get_device_by_id_tenant_admin(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    var device = deviceManagement.getDeviceById['tenant_admin']("test-device-001");
+    
+    test.assertEquals("test-device-001", device.id, "Tenant admin should be able to get device");
+    test.assertTrue(device.id.length() > 0, "Device should not be null");
+};
+
+@test
+function test_get_device_by_id_customer_user(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    var device = deviceManagement.getDeviceById['customer_user']("test-device-001");
+    
+    test.assertEquals("test-device-001", device.id, "Customer user should be able to get device");
+    test.assertTrue(device.id.length() > 0, "Device should not be null");
+};
+
+@test
+function test_delete_device_sys_admin(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    // Should not throw an exception
+    deviceManagement.deleteDevice['sys_admin']("device-to-delete");
+    
+    test.assertTrue(true, "Sys admin should be able to delete device");
+};
+
+@test
+function test_delete_device_tenant_admin(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    // Should not throw an exception
+    deviceManagement.deleteDevice['tenant_admin']("device-to-delete");
+    
+    test.assertTrue(true, "Tenant admin should be able to delete device");
+};
+
+@test
+function test_delete_device_customer_user_should_fail(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    test.assertFails(function() -> deviceManagement.deleteDevice['customer_user']("device-to-delete"), 
+        "Customer user should not be able to delete devices");
+};
+
+@test
+function test_assign_device_to_customer_sys_admin(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    // Should not throw an exception
+    deviceManagement.assignDeviceToCustomer['sys_admin']("device-001", "customer-001");
+    
+    test.assertTrue(true, "Sys admin should be able to assign device to customer");
+};
+
+@test
+function test_assign_device_to_customer_tenant_admin(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    // Should not throw an exception
+    deviceManagement.assignDeviceToCustomer['tenant_admin']("device-001", "customer-001");
+    
+    test.assertTrue(true, "Tenant admin should be able to assign device to customer");
+};
+
+@test
+function test_assign_device_to_customer_customer_user_should_fail(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    test.assertFails(function() -> deviceManagement.assignDeviceToCustomer['customer_user']("device-001", "customer-001"), 
+        "Customer user should not be able to assign devices");
+};
+
+@test
+function test_unassign_device_from_customer_sys_admin(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    // Should not throw an exception
+    deviceManagement.unassignDeviceFromCustomer['sys_admin']("device-001");
+    
+    test.assertTrue(true, "Sys admin should be able to unassign device from customer");
+};
+
+@test
+function test_unassign_device_from_customer_tenant_admin(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    // Should not throw an exception
+    deviceManagement.unassignDeviceFromCustomer['tenant_admin']("device-001");
+    
+    test.assertTrue(true, "Tenant admin should be able to unassign device from customer");
+};
+
+@test
+function test_unassign_device_from_customer_customer_user_should_fail(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    test.assertFails(function() -> deviceManagement.unassignDeviceFromCustomer['customer_user']("device-001"), 
+        "Customer user should not be able to unassign devices");
+};
+
+@test
+function test_device_with_all_optional_fields(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    var deviceWithAllFields = Device(
+        id = "complete-device-001",
+        name = "Complete Device",
+        type = "gateway",
+        tenantId = "tenant-001",
+        customerId = optionalOf("customer-001"),
+        credentials = "complete-credentials",
+        label = optionalOf("Complete Label"),
+        deviceProfileId = optionalOf("gateway-profile"),
+        firmwareId = optionalOf("firmware-v2.0"),
+        softwareId = optionalOf("software-v2.0"),
+        externalId = optionalOf("ext-complete-001"),
+        version = optionalOf(2),
+        additionalInfo = optionalOf("{\"location\": \"building-b\", \"floor\": 3}"),
+        createdTime = optionalOf(1640995200000),
+        deviceData = optionalOf("{\"config\": {\"protocol\": \"mqtt\", \"port\": 1883}}")
+    );
+    
+    var result = deviceManagement.saveDevice['sys_admin'](deviceWithAllFields);
+    
+    test.assertEquals(deviceWithAllFields.id, result.id, "Complete device ID should match");
+    test.assertEquals(deviceWithAllFields.name, result.name, "Complete device name should match");
+    test.assertEquals(deviceWithAllFields.type, result.type, "Complete device type should match");
+    test.assertEquals(deviceWithAllFields.customerId.getOrElse(""), result.customerId.getOrElse(""), "Customer ID should match");
+    test.assertEquals(deviceWithAllFields.label.getOrElse(""), result.label.getOrElse(""), "Label should match");
+    test.assertEquals(deviceWithAllFields.version.getOrElse(0), result.version.getOrElse(0), "Version should match");
+};
+
+@test
+function test_device_with_minimal_fields(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    var minimalDevice = Device(
+        id = "minimal-device-001",
+        name = "Minimal Device",
+        type = "sensor",
+        tenantId = "tenant-001",
+        customerId = optionalOf<Text>(),
+        credentials = "minimal-credentials",
+        label = optionalOf<Text>(),
+        deviceProfileId = optionalOf<Text>(),
+        firmwareId = optionalOf<Text>(),
+        softwareId = optionalOf<Text>(),
+        externalId = optionalOf<Text>(),
+        version = optionalOf<Number>(),
+        additionalInfo = optionalOf<Text>(),
+        createdTime = optionalOf<Number>(),
+        deviceData = optionalOf<Text>()
+    );
+    
+    var result = deviceManagement.saveDevice['sys_admin'](minimalDevice);
+    
+    test.assertEquals(minimalDevice.id, result.id, "Minimal device ID should match");
+    test.assertEquals(minimalDevice.name, result.name, "Minimal device name should match");
+    test.assertEquals(minimalDevice.type, result.type, "Minimal device type should match");
+    test.assertEquals(minimalDevice.tenantId, result.tenantId, "Minimal device tenant ID should match");
+    test.assertEquals(minimalDevice.credentials, result.credentials, "Minimal device credentials should match");
+};
+
+@test
+function test_device_update_existing(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    // Create initial device
+    var initialDevice = Device(
+        id = "update-device-001",
+        name = "Original Name",
+        type = "sensor",
+        tenantId = "tenant-001",
+        customerId = optionalOf<Text>(),
+        credentials = "original-credentials",
+        label = optionalOf<Text>(),
+        deviceProfileId = optionalOf<Text>(),
+        firmwareId = optionalOf<Text>(),
+        softwareId = optionalOf<Text>(),
+        externalId = optionalOf<Text>(),
+        version = optionalOf<Number>(),
+        additionalInfo = optionalOf<Text>(),
+        createdTime = optionalOf<Number>(),
+        deviceData = optionalOf<Text>()
+    );
+    
+    var createdDevice = deviceManagement.saveDevice['sys_admin'](initialDevice);
+    
+    // Update the device
+    var updatedDevice = Device(
+        id = "update-device-001",
+        name = "Updated Name",
+        type = "actuator",
+        tenantId = "tenant-001",
+        customerId = optionalOf("customer-001"),
+        credentials = "updated-credentials",
+        label = optionalOf("Updated Label"),
+        deviceProfileId = optionalOf("updated-profile"),
+        firmwareId = optionalOf("firmware-v3.0"),
+        softwareId = optionalOf("software-v3.0"),
+        externalId = optionalOf("ext-updated-001"),
+        version = optionalOf(3),
+        additionalInfo = optionalOf("{\"status\": \"updated\"}"),
+        createdTime = optionalOf(1640995200000),
+        deviceData = optionalOf("{\"config\": {\"updated\": true}}")
+    );
+    
+    var result = deviceManagement.saveDevice['sys_admin'](updatedDevice);
+    
+    test.assertEquals(updatedDevice.id, result.id, "Updated device ID should match");
+    test.assertEquals(updatedDevice.name, result.name, "Updated device name should match");
+    test.assertEquals(updatedDevice.type, result.type, "Updated device type should match");
+    test.assertEquals(updatedDevice.customerId.getOrElse(""), result.customerId.getOrElse(""), "Updated customer ID should match");
+    test.assertEquals(updatedDevice.label.getOrElse(""), result.label.getOrElse(""), "Updated label should match");
+    test.assertEquals(updatedDevice.version.getOrElse(0), result.version.getOrElse(0), "Updated version should match");
+};
+
+@test
+function test_device_operations_workflow(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    // 1. Create device
+    var newDevice = Device(
+        id = "workflow-device-001",
+        name = "Workflow Device",
+        type = "gateway",
+        tenantId = "tenant-001",
+        customerId = optionalOf<Text>(),
+        credentials = "workflow-credentials",
+        label = optionalOf("Workflow Label"),
+        deviceProfileId = optionalOf("workflow-profile"),
+        firmwareId = optionalOf<Text>(),
+        softwareId = optionalOf<Text>(),
+        externalId = optionalOf<Text>(),
+        version = optionalOf(1),
+        additionalInfo = optionalOf("{\"workflow\": \"test\"}"),
+        createdTime = optionalOf(1640995200000),
+        deviceData = optionalOf<Text>()
+    );
+    
+    var createdDevice = deviceManagement.saveDevice['sys_admin'](newDevice);
+    test.assertEquals(newDevice.id, createdDevice.id, "Device should be created successfully");
+    
+    // 2. Retrieve device
+    var retrievedDevice = deviceManagement.getDeviceById['sys_admin'](newDevice.id);
+    test.assertEquals(newDevice.id, retrievedDevice.id, "Device should be retrievable");
+    
+    // 3. Assign to customer
+    deviceManagement.assignDeviceToCustomer['sys_admin'](newDevice.id, "customer-001");
+    test.assertTrue(true, "Device should be assignable to customer");
+    
+    // 4. Unassign from customer
+    deviceManagement.unassignDeviceFromCustomer['sys_admin'](newDevice.id);
+    test.assertTrue(true, "Device should be unassignable from customer");
+    
+    // 5. Delete device
+    deviceManagement.deleteDevice['sys_admin'](newDevice.id);
+    test.assertTrue(true, "Device should be deletable");
+};
+
+@test
+function test_permission_validation_sys_admin_full_access(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    var testDevice = Device(
+        id = "permission-test-001",
+        name = "Permission Test Device",
+        type = "sensor",
+        tenantId = "tenant-001",
+        customerId = optionalOf<Text>(),
+        credentials = "permission-credentials",
+        label = optionalOf<Text>(),
+        deviceProfileId = optionalOf<Text>(),
+        firmwareId = optionalOf<Text>(),
+        softwareId = optionalOf<Text>(),
+        externalId = optionalOf<Text>(),
+        version = optionalOf<Number>(),
+        additionalInfo = optionalOf<Text>(),
+        createdTime = optionalOf<Number>(),
+        deviceData = optionalOf<Text>()
+    );
+    
+    // Sys admin should have full access
+    var savedDevice = deviceManagement.saveDevice['sys_admin'](testDevice);
+    test.assertEquals(testDevice.id, savedDevice.id, "Sys admin should be able to save device");
+    
+    var retrievedDevice = deviceManagement.getDeviceById['sys_admin'](testDevice.id);
+    test.assertEquals(testDevice.id, retrievedDevice.id, "Sys admin should be able to get device");
+    
+    deviceManagement.assignDeviceToCustomer['sys_admin'](testDevice.id, "customer-001");
+    test.assertTrue(true, "Sys admin should be able to assign device");
+    
+    deviceManagement.unassignDeviceFromCustomer['sys_admin'](testDevice.id);
+    test.assertTrue(true, "Sys admin should be able to unassign device");
+    
+    deviceManagement.deleteDevice['sys_admin'](testDevice.id);
+    test.assertTrue(true, "Sys admin should be able to delete device");
+};
+
+@test
+function test_permission_validation_tenant_admin_limited_access(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    var testDevice = Device(
+        id = "tenant-permission-test-001",
+        name = "Tenant Permission Test Device",
+        type = "actuator",
+        tenantId = "tenant-001",
+        customerId = optionalOf<Text>(),
+        credentials = "tenant-permission-credentials",
+        label = optionalOf<Text>(),
+        deviceProfileId = optionalOf<Text>(),
+        firmwareId = optionalOf<Text>(),
+        softwareId = optionalOf<Text>(),
+        externalId = optionalOf<Text>(),
+        version = optionalOf<Number>(),
+        additionalInfo = optionalOf<Text>(),
+        createdTime = optionalOf<Number>(),
+        deviceData = optionalOf<Text>()
+    );
+    
+    // Tenant admin should have limited access (no delete for this test)
+    var savedDevice = deviceManagement.saveDevice['tenant_admin'](testDevice);
+    test.assertEquals(testDevice.id, savedDevice.id, "Tenant admin should be able to save device");
+    
+    var retrievedDevice = deviceManagement.getDeviceById['tenant_admin'](testDevice.id);
+    test.assertEquals(testDevice.id, retrievedDevice.id, "Tenant admin should be able to get device");
+    
+    deviceManagement.assignDeviceToCustomer['tenant_admin'](testDevice.id, "customer-001");
+    test.assertTrue(true, "Tenant admin should be able to assign device");
+    
+    deviceManagement.unassignDeviceFromCustomer['tenant_admin'](testDevice.id);
+    test.assertTrue(true, "Tenant admin should be able to unassign device");
+};
+
+@test
+function test_permission_validation_customer_user_read_only(test: Test) -> {
+    var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
+    
+    // Customer user should only have read access
+    var retrievedDevice = deviceManagement.getDeviceById['customer_user']("test-device-001");
+    test.assertEquals("test-device-001", retrievedDevice.id, "Customer user should be able to get device");
+    
+    // Customer user should not be able to perform write operations
+    var testDevice = Device(
+        id = "customer-permission-test-001",
+        name = "Customer Permission Test Device",
+        type = "sensor",
+        tenantId = "tenant-001",
+        customerId = optionalOf<Text>(),
+        credentials = "customer-permission-credentials",
+        label = optionalOf<Text>(),
+        deviceProfileId = optionalOf<Text>(),
+        firmwareId = optionalOf<Text>(),
+        softwareId = optionalOf<Text>(),
+        externalId = optionalOf<Text>(),
+        version = optionalOf<Number>(),
+        additionalInfo = optionalOf<Text>(),
+        createdTime = optionalOf<Number>(),
+        deviceData = optionalOf<Text>()
+    );
+    
+    test.assertFails(function() -> deviceManagement.saveDevice['customer_user'](testDevice), 
+        "Customer user should not be able to save device");
+    
+    test.assertFails(function() -> deviceManagement.deleteDevice['customer_user']("test-device-001"), 
+        "Customer user should not be able to delete device");
+    
+    test.assertFails(function() -> deviceManagement.assignDeviceToCustomer['customer_user']("test-device-001", "customer-001"), 
+        "Customer user should not be able to assign device");
+    
+    test.assertFails(function() -> deviceManagement.unassignDeviceFromCustomer['customer_user']("test-device-001"), 
+        "Customer user should not be able to unassign device");
+}; 

@@ -1,0 +1,12 @@
+deviceManagement.DeviceManagement:
+  sys_admin:
+    extract:
+      entity:
+        - preferred_username
+  tenant_admin:
+    extract:
+      entity:
+        - preferred_username
+  customer_user:
+    extract:
+      entity:
