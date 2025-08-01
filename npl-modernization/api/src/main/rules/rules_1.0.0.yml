@@ -10,3 +10,4 @@ deviceManagement.DeviceManagement:
   customer_user:
     extract:
       entity:
+        - preferred_username
