@@ -1,0 +1,636 @@
+openapi: 3.0.1
+info:
+  title: deviceManagement
+  version: "1.0"
+servers:
+- url: http://localhost:12000
+security:
+- jwt: []
+paths:
+  /npl/deviceManagement/-/openapi.json:
+    get:
+      operationId: _getOpenAPI
+      responses:
+        "200":
+          description: The OpenAPI spec
+          content:
+            application/json:
+              schema:
+                type: object
+      security: []
+  /npl/deviceManagement/DeviceManagement/:
+    get:
+      operationId: _getDeviceManagementList
+      parameters:
+      - name: page
+        in: query
+        required: false
+        schema:
+          minimum: 1
+          type: integer
+      - name: pageSize
+        in: query
+        required: false
+        schema:
+          maximum: 100
+          minimum: 1
+          type: integer
+          default: 25
+      - name: includeCount
+        in: query
+        description: "Include `totalItems` and `totalPages` in the response if set.\
+          \ This option is very expensive, so should be avoided when possible."
+        required: false
+        schema:
+          type: boolean
+          default: false
+      - $ref: "#/components/parameters/API_Version"
+      - $ref: "#/components/parameters/NPL_Tag"
+      responses:
+        "200":
+          description: All accessible protocol instances of this type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceManagement_List"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "500":
+          $ref: "#/components/responses/500"
+    post:
+      operationId: _createDeviceManagement
+      parameters:
+      - $ref: "#/components/parameters/API_Version"
+      - $ref: "#/components/parameters/NPL_Tag"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceManagement_Create"
+        required: true
+      responses:
+        "200":
+          description: The new protocol instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceManagement"
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "500":
+          $ref: "#/components/responses/500"
+  /npl/deviceManagement/DeviceManagement/{id}/:
+    get:
+      operationId: _getDeviceManagementByID
+      parameters:
+      - $ref: "#/components/parameters/ProtocolID"
+      - $ref: "#/components/parameters/API_Version"
+      - $ref: "#/components/parameters/NPL_Tag"
+      responses:
+        "200":
+          description: The protocol instance with this ID
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceManagement"
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+  /npl/deviceManagement/DeviceManagement/{id}/saveDevice:
+    post:
+      operationId: DeviceManagement_saveDevice
+      parameters:
+      - $ref: "#/components/parameters/ProtocolID"
+      - $ref: "#/components/parameters/API_Version"
+      - $ref: "#/components/parameters/NPL_Tag"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceManagement_SaveDevice_Command"
+        required: true
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+  /npl/deviceManagement/DeviceManagement/{id}/getDeviceById:
+    post:
+      operationId: DeviceManagement_getDeviceById
+      parameters:
+      - $ref: "#/components/parameters/ProtocolID"
+      - $ref: "#/components/parameters/API_Version"
+      - $ref: "#/components/parameters/NPL_Tag"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceManagement_GetDeviceById_Command"
+        required: true
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Device"
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+  /npl/deviceManagement/DeviceManagement/{id}/deleteDevice:
+    post:
+      operationId: DeviceManagement_deleteDevice
+      parameters:
+      - $ref: "#/components/parameters/ProtocolID"
+      - $ref: "#/components/parameters/API_Version"
+      - $ref: "#/components/parameters/NPL_Tag"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceManagement_DeleteDevice_Command"
+        required: true
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                description: Unit
+                nullable: false
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+  /npl/deviceManagement/DeviceManagement/{id}/assignDeviceToCustomer:
+    post:
+      operationId: DeviceManagement_assignDeviceToCustomer
+      parameters:
+      - $ref: "#/components/parameters/ProtocolID"
+      - $ref: "#/components/parameters/API_Version"
+      - $ref: "#/components/parameters/NPL_Tag"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceManagement_AssignDeviceToCustomer_Command"
+        required: true
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                description: Unit
+                nullable: false
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+  /npl/deviceManagement/DeviceManagement/{id}/unassignDeviceFromCustomer:
+    post:
+      operationId: DeviceManagement_unassignDeviceFromCustomer
+      parameters:
+      - $ref: "#/components/parameters/ProtocolID"
+      - $ref: "#/components/parameters/API_Version"
+      - $ref: "#/components/parameters/NPL_Tag"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceManagement_UnassignDeviceFromCustomer_Command"
+        required: true
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                description: Unit
+                nullable: false
+        "204":
+          description: No Content
+        "400":
+          $ref: "#/components/responses/400"
+        "401":
+          $ref: "#/components/responses/401"
+        "403":
+          $ref: "#/components/responses/403"
+        "404":
+          $ref: "#/components/responses/404"
+        "500":
+          $ref: "#/components/responses/500"
+components:
+  schemas:
+    _Party:
+      required:
+      - access
+      - entity
+      type: object
+      properties:
+        entity:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+        access:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+      example:
+        entity:
+          iss:
+          - https://example.com
+          organization:
+          - Example
+        access:
+          preferred_email:
+          - john.doe@example.com
+    _Period:
+      required:
+      - days
+      - months
+      - weeks
+      - years
+      type: object
+      properties:
+        days:
+          type: integer
+        weeks:
+          type: integer
+        months:
+          type: integer
+        years:
+          type: integer
+    _Error:
+      type: object
+      properties:
+        errorType:
+          type: string
+        id:
+          type: string
+          format: uuid
+        idType:
+          type: string
+        message:
+          type: string
+        error:
+          type: string
+          nullable: true
+        origin:
+          type: object
+          properties:
+            value:
+              type: string
+            code:
+              type: integer
+              format: int32
+            originType:
+              type: string
+            id:
+              type: string
+            message:
+              type: string
+          nullable: true
+        stackTrace:
+          type: string
+          nullable: true
+        clientStackTrace:
+          type: array
+          nullable: true
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              protocolId:
+                type: string
+                format: uuid
+                nullable: true
+              elementType:
+                type: string
+              location:
+                type: object
+                properties:
+                  file:
+                    type: string
+                  line:
+                    type: integer
+                    format: int32
+                  sourceRef:
+                    type: object
+                    properties:
+                      path:
+                        type: string
+                      commit:
+                        type: string
+                    nullable: true
+            nullable: true
+    Device:
+      required:
+      - additionalInfo
+      - createdTime
+      - credentials
+      - customerId
+      - deviceData
+      - deviceProfileId
+      - externalId
+      - firmwareId
+      - id
+      - label
+      - name
+      - softwareId
+      - tenantId
+      - type
+      - version
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        tenantId:
+          type: string
+        customerId:
+          type: string
+          nullable: true
+        credentials:
+          type: string
+        label:
+          type: string
+          nullable: true
+        deviceProfileId:
+          type: string
+          nullable: true
+        firmwareId:
+          type: string
+          nullable: true
+        softwareId:
+          type: string
+          nullable: true
+        externalId:
+          type: string
+          nullable: true
+        version:
+          type: number
+          nullable: true
+        additionalInfo:
+          type: string
+          nullable: true
+        createdTime:
+          type: number
+          nullable: true
+        deviceData:
+          type: string
+          nullable: true
+    DeviceManagement:
+      required:
+      - '@actions'
+      - '@id'
+      - '@parties'
+      - '@state'
+      type: object
+      properties:
+        '@id':
+          type: string
+          format: uuid
+        '@parties':
+          $ref: "#/components/schemas/DeviceManagement_Parties"
+        '@actions':
+          $ref: "#/components/schemas/DeviceManagement_Actions"
+        '@state':
+          $ref: "#/components/schemas/DeviceManagement_States"
+      readOnly: true
+    DeviceManagement_Parties:
+      required:
+      - customer_user
+      - sys_admin
+      - tenant_admin
+      type: object
+      properties:
+        sys_admin:
+          $ref: "#/components/schemas/_Party"
+        tenant_admin:
+          $ref: "#/components/schemas/_Party"
+        customer_user:
+          $ref: "#/components/schemas/_Party"
+    DeviceManagement_Actions:
+      type: object
+      properties:
+        saveDevice:
+          type: string
+          format: uri
+          example: http://localhost:12000/npl/deviceManagement/DeviceManagement/1ee39a43-8e4e-4b3b-8f1f-1e11ad495436/saveDevice
+        getDeviceById:
+          type: string
+          format: uri
+          example: http://localhost:12000/npl/deviceManagement/DeviceManagement/1ee39a43-8e4e-4b3b-8f1f-1e11ad495436/getDeviceById
+        deleteDevice:
+          type: string
+          format: uri
+          example: http://localhost:12000/npl/deviceManagement/DeviceManagement/1ee39a43-8e4e-4b3b-8f1f-1e11ad495436/deleteDevice
+        assignDeviceToCustomer:
+          type: string
+          format: uri
+          example: http://localhost:12000/npl/deviceManagement/DeviceManagement/1ee39a43-8e4e-4b3b-8f1f-1e11ad495436/assignDeviceToCustomer
+        unassignDeviceFromCustomer:
+          type: string
+          format: uri
+          example: http://localhost:12000/npl/deviceManagement/DeviceManagement/1ee39a43-8e4e-4b3b-8f1f-1e11ad495436/unassignDeviceFromCustomer
+    DeviceManagement_List:
+      required:
+      - items
+      type: object
+      properties:
+        '@prev':
+          type: string
+          format: uri
+          example: http://localhost:12000/npl/deviceManagement/DeviceManagement/?page=1&pageSize=10
+        '@next':
+          type: string
+          format: uri
+          example: http://localhost:12000/npl/deviceManagement/DeviceManagement/?page=3&pageSize=10
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DeviceManagement"
+        page:
+          type: integer
+        totalItems:
+          type: integer
+          description: Total number of accessible protocol instances. Only included
+            if the `includeCount` query parameter was set.
+          nullable: true
+        totalPages:
+          type: integer
+          description: Total number of accessible pages. Only included if the `includeCount`
+            query parameter was set.
+          nullable: true
+    DeviceManagement_Create:
+      required:
+      - '@parties'
+      type: object
+      properties:
+        '@parties':
+          $ref: "#/components/schemas/DeviceManagement_Parties"
+    DeviceManagement_States:
+      type: string
+      enum:
+      - active
+    DeviceManagement_SaveDevice_Command:
+      required:
+      - device
+      type: object
+      properties:
+        device:
+          $ref: "#/components/schemas/Device"
+    DeviceManagement_GetDeviceById_Command:
+      required:
+      - id
+      type: object
+      properties:
+        id:
+          type: string
+    DeviceManagement_DeleteDevice_Command:
+      required:
+      - id
+      type: object
+      properties:
+        id:
+          type: string
+    DeviceManagement_AssignDeviceToCustomer_Command:
+      required:
+      - customerId
+      - deviceId
+      type: object
+      properties:
+        deviceId:
+          type: string
+        customerId:
+          type: string
+    DeviceManagement_UnassignDeviceFromCustomer_Command:
+      required:
+      - deviceId
+      type: object
+      properties:
+        deviceId:
+          type: string
+  responses:
+    "400":
+      description: Bad Request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/_Error"
+    "401":
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/_Error"
+    "403":
+      description: Forbidden
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/_Error"
+    "404":
+      description: Not Found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/_Error"
+    "500":
+      description: Internal Server Error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/_Error"
+  parameters:
+    API_Version:
+      name: X-NPL-API
+      in: header
+      description: Optional parameter to require a specific API version
+      required: false
+      schema:
+        type: string
+    NPL_Tag:
+      name: X-NPL-TAG
+      in: header
+      description: Optional parameter to require a specific NPL Tag
+      required: false
+      schema:
+        type: string
+    ProtocolID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  securitySchemes:
+    jwt:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT

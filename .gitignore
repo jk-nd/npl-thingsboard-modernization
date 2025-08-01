@@ -42,9 +42,5 @@ rebuild-docker.sh
 .cursorrules
 .vscode/
 node_modules/
-package-lock.json
-package.json
 npl-modernization/frontend-overlay/dist/
-npl-modernization/overlay/*.js
-openapi/
 thingsboard_postgres_data/
