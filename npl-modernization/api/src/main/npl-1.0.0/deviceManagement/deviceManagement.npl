@@ -62,6 +62,33 @@ notification deviceAssigned(deviceId: Text, customerId: Text) returns Unit;
 notification deviceUnassigned(deviceId: Text) returns Unit;
 
 /**
+ * Notification for device credentials update
+ * @param deviceId The device ID
+ * @param credentials The updated credentials
+ */
+notification deviceCredentialsUpdated(deviceId: Text, credentials: Text) returns Unit;
+
+/**
+ * Notification for device credentials deletion
+ * @param deviceId The device ID
+ */
+notification deviceCredentialsDeleted(deviceId: Text) returns Unit;
+
+/**
+ * Notification for device claiming
+ * @param deviceId The device ID
+ * @param claimedBy The party that claimed the device
+ */
+notification deviceClaimed(deviceId: Text, claimedBy: Text) returns Unit;
+
+/**
+ * Notification for device reclaiming
+ * @param deviceId The device ID
+ * @param reclaimedBy The party that reclaimed the device
+ */
+notification deviceReclaimed(deviceId: Text, reclaimedBy: Text) returns Unit;
+
+/**
  * Device management protocol for CRUD and assignment operations.
  * Maps to ThingsBoard user roles:
  * - sys_admin: System administrator with full access
@@ -152,6 +179,55 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
         
         // Emit notification for device unassignment
         notify deviceUnassigned(deviceId);
+    };
+
+    /**
+     * Save device credentials. Only sys_admin and tenant_admin can perform this.
+     * @param deviceId The device ID
+     * @param credentials The device credentials
+     */
+    @api
+    permission[sys_admin | tenant_admin] saveDeviceCredentials(deviceId: Text, credentials: Text) | active {
+        // Implementation would save the device credentials
+        
+        // Emit notification for credentials update
+        notify deviceCredentialsUpdated(deviceId, credentials);
+    };
+
+    /**
+     * Delete device credentials. Only sys_admin and tenant_admin can perform this.
+     * @param deviceId The device ID
+     */
+    @api
+    permission[sys_admin | tenant_admin] deleteDeviceCredentials(deviceId: Text) | active {
+        // Implementation would delete the device credentials
+        
+        // Emit notification for credentials deletion
+        notify deviceCredentialsDeleted(deviceId);
+    };
+
+    /**
+     * Claim a device. Only sys_admin and tenant_admin can perform this.
+     * @param deviceId The device ID
+     */
+    @api
+    permission[sys_admin | tenant_admin] claimDevice(deviceId: Text) | active {
+        // Implementation would claim the device
+        
+        // Emit notification for device claiming
+        notify deviceClaimed(deviceId, "current_party");
+    };
+
+    /**
+     * Reclaim a device. Only sys_admin and tenant_admin can perform this.
+     * @param deviceId The device ID
+     */
+    @api
+    permission[sys_admin | tenant_admin] reclaimDevice(deviceId: Text) | active {
+        // Implementation would reclaim the device
+        
+        // Emit notification for device reclaiming
+        notify deviceReclaimed(deviceId, "current_party");
     };
 
 

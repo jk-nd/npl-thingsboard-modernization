@@ -4,8 +4,20 @@ services:
     ports:
       - "5434:5432"
     environment:
+      POSTGRES_USER: postgres
       POSTGRES_PASSWORD: welcome123
       POSTGRES_DB: npl_engine
+      ENGINE_DB_USER: postgres
+      ENGINE_DB_PASSWORD: welcome123
+      READ_MODEL_DB_USER: postgraphile
+      READ_MODEL_DB_PASSWORD: secret
+    volumes:
+      - ./db_init.sh:/docker-entrypoint-initdb.d/db_init.sh
+    healthcheck:
+      test: pg_isready -U postgres
+      interval: 1s
+      timeout: 5s
+      retries: 50
 
   rabbitmq:
     image: rabbitmq:3.12-management-alpine
@@ -48,6 +60,9 @@ services:
       ENGINE_DEV_MODE: false
       ENGINE_DB_URL: jdbc:postgresql://postgres:5432/npl_engine
       ENGINE_DB_USER: postgres
+      ENGINE_DB_SCHEMA: noumena
+      # Enable Read Model access
+      ENGINE_DB_READ_MODEL_USER: postgraphile
       # Use OIDC proxy service name as the issuer
       ENGINE_ALLOWED_ISSUERS: "http://oidc-proxy:8080"
       # JWT Claim Mapping for ThingsBoard
@@ -57,8 +72,10 @@ services:
       # Production settings
       ENGINE_MANAGEMENT_HOST: 0.0.0.0
     depends_on:
-      - postgres
-      - oidc-proxy
+      postgres:
+        condition: service_healthy
+      oidc-proxy:
+        condition: service_started
 
   sync-service:
     build:
@@ -98,6 +115,29 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  # NPL Read Model - GraphQL API for frontend access
+  read-model:
+    image: ghcr.io/noumenadigital/images/read-model:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      engine:
+        condition: service_healthy
+    ports:
+      - "5555:5555"
+    environment:
+      READ_MODEL_DB_URL: "postgresql://postgraphile:secret@postgres:5432/npl_engine"
+      READ_MODEL_DB_SCHEMA: noumena
+      READ_MODEL_DB_USER: postgraphile
+      READ_MODEL_ALLOWED_ISSUERS: "http://oidc-proxy:8080"
+      READ_MODEL_ENGINE_HEALTH_ENDPOINT: "http://engine:12000/actuator/health"
+      READ_MODEL_ENGINE_HEALTH_TIMEOUT_SECONDS: 120
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5555/graphql"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
 
 volumes:
   rabbitmq_data:
