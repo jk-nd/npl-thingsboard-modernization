@@ -65,11 +65,17 @@ services:
       ENGINE_DB_USER: "postgres"
       ENGINE_ALLOWED_ISSUERS: "http://oidc-proxy:8080/realms/thingsboard"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - npl-network
     volumes:
       - ./npl-modernization/api/src/main:/migrations
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:12000/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   read-model:
     image: "ghcr.io/noumenadigital/images/read-model:latest"
@@ -81,9 +87,12 @@ services:
       READ_MODEL_DB_SCHEMA: "noumena"
       READ_MODEL_ALLOWED_ISSUERS: "http://oidc-proxy:8080/realms/thingsboard"
       READ_MODEL_ENGINE_HEALTH_ENDPOINT: "http://engine:12000/actuator/health"
+      READ_MODEL_ENGINE_HEALTH_TIMEOUT_SECONDS: "60"
     depends_on:
-      - engine
-      - postgres
+      engine:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
     networks:
       - npl-network
 
@@ -120,11 +129,15 @@ services:
       SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/thingsboard"
       SPRING_DATASOURCE_USERNAME: "postgres"
       SPRING_DATASOURCE_PASSWORD: "welcome123"
+      INSTALL_TB: "true"
+      LOAD_DEMO: "true"
+      TB_SERVICE_ID: "tb-node"
     volumes:
       - tb-data:/data
       - tb-logs:/var/log/thingsboard
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - npl-network
 
