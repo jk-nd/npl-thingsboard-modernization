@@ -48,3 +48,4 @@ npl-modernization/frontend-overlay/dist/
 npl-modernization/overlay/*.js
 openapi/
 /docker-compose.yml
+thingsboard_postgres_data/

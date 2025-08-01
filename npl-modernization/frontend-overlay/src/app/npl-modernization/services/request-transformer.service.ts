@@ -1,9 +1,9 @@
 import { Injectable } from '@angular/core';
 import { HttpRequest, HttpResponse, HttpEvent } from '@angular/common/http';
-import { Observable, of } from 'rxjs';
+import { Observable } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { DeviceGraphQLService, DevicesConnection } from './device-graphql.service';
-import { NplClientService, Device } from './npl-client.service';
+import { NplClientService } from './npl-client.service';
 
 export interface TransformationResult {
   observable: Observable<HttpEvent<any>>;
@@ -57,7 +57,11 @@ export class RequestTransformerService {
       (url.includes('/api/customer') && url.includes('/devices')) ||  // GET /api/customer/{customerId}/devices
       (url.includes('/api/devices') && url.includes('textSearch')) || // GET /api/devices?textSearch=X
       url.includes('/api/tenant/device-infos') ||              // GET /api/tenant/device-infos
-      (url.includes('/api/customer') && url.includes('/device-infos')) // GET /api/customer/{customerId}/device-infos
+      (url.includes('/api/customer') && url.includes('/device-infos')) || // GET /api/customer/{customerId}/device-infos
+      url.includes('/api/device/types') ||                    // NEW: GET /api/device/types
+      url.includes('/api/devices/count') ||                   // NEW: GET /api/devices/count
+      url.includes('/api/devices/by-profile') ||              // NEW: GET /api/devices/by-profile/{profileId}
+      url.includes('/api/device-stats')                       // NEW: GET /api/device-stats
     );
   }
 
@@ -78,6 +82,49 @@ export class RequestTransformerService {
    */
   transformToGraphQL(req: HttpRequest<any>): Observable<HttpEvent<any>> {
     const url = req.url;
+    const params = this.extractQueryParams(url);
+
+    // Get device types with counts
+    if (url.includes('/api/device/types')) {
+      return this.graphqlService.getDeviceTypes().pipe(
+        map(types => this.createHttpResponse(req, {
+          data: types.map(t => ({ type: t.type, count: t.count }))
+        }))
+      );
+    }
+
+    // Get devices by profile
+    const profileMatch = url.match(/\/api\/devices\/by-profile\/([^/]+)$/);
+    if (profileMatch) {
+      const profileId = profileMatch[1];
+      const pageSize = parseInt(params['pageSize']) || 20;
+      const page = parseInt(params['page']) || 0;
+
+      return this.graphqlService.getDevicesByProfile(profileId, pageSize, page).pipe(
+        map(connection => this.createHttpResponse(req, this.transformConnectionToThingsBoard(connection)))
+      );
+    }
+
+    // Get device statistics
+    if (url.includes('/api/device-stats')) {
+      return this.graphqlService.getDeviceStatistics().pipe(
+        map(stats => this.createHttpResponse(req, stats))
+      );
+    }
+
+    // Advanced search with multiple criteria
+    if (url.includes('/api/devices') && url.includes('textSearch')) {
+      const criteria = {
+        textSearch: params['textSearch'],
+        type: params['type'],
+        profileId: params['profileId'],
+        hasCredentials: params['hasCredentials'] === 'true'
+      };
+
+      return this.graphqlService.searchDevicesAdvanced(criteria).pipe(
+        map(connection => this.createHttpResponse(req, this.transformConnectionToThingsBoard(connection)))
+      );
+    }
 
     // GET /api/device/{id}
     const deviceIdMatch = url.match(/\/api\/device\/([^/]+)$/);
@@ -90,7 +137,6 @@ export class RequestTransformerService {
 
     // GET /api/tenant/devices with pagination
     if (url.includes('/api/tenant/devices')) {
-      const params = this.extractQueryParams(url);
       const pageSize = parseInt(params['pageSize']) || 20;
       const page = parseInt(params['page']) || 0;
       
@@ -99,33 +145,23 @@ export class RequestTransformerService {
       );
     }
 
-    // GET /api/devices?textSearch=X
-    if (url.includes('/api/devices') && url.includes('textSearch')) {
-      const params = this.extractQueryParams(url);
-      const textSearch = params['textSearch'] || '';
-      const pageSize = parseInt(params['pageSize']) || 20;
-      const page = parseInt(params['page']) || 0;
-
-      return this.graphqlService.searchDevices(textSearch, pageSize, page).pipe(
-        map(connection => this.createHttpResponse(req, this.transformConnectionToThingsBoard(connection)))
-      );
-    }
-
     // GET /api/customer/{customerId}/devices
     const customerDevicesMatch = url.match(/\/api\/customer\/([^/]+)\/devices/);
     if (customerDevicesMatch) {
       const customerId = customerDevicesMatch[1];
-      const params = this.extractQueryParams(url);
       const pageSize = parseInt(params['pageSize']) || 20;
       const page = parseInt(params['page']) || 0;
 
-      return this.graphqlService.getCustomerDevices(customerId, pageSize, page).pipe(
+      return this.graphqlService.getTenantDevices(pageSize, page, {
+        field: { equalTo: "customerId" },
+        value: { equalTo: customerId }
+      }).pipe(
         map(connection => this.createHttpResponse(req, this.transformConnectionToThingsBoard(connection)))
       );
     }
 
     // Default fallback
-    return this.graphqlService.getDevices().pipe(
+    return this.graphqlService.getTenantDevices().pipe(
       map(connection => this.createHttpResponse(req, this.transformConnectionToThingsBoard(connection)))
     );
   }
@@ -143,7 +179,7 @@ export class RequestTransformerService {
 
     // POST /api/device - Create device
     if (method === 'POST' && url === '/api/device') {
-      const device = req.body as Device;
+      const device = req.body as any; // Assuming Device type is not directly imported here
       return this.nplService.saveDevice(this.protocolId, device).pipe(
         map(result => this.createHttpResponse(req, result))
       );
@@ -151,7 +187,7 @@ export class RequestTransformerService {
 
     // PUT /api/device - Update device
     if (method === 'PUT' && url === '/api/device') {
-      const device = req.body as Device;
+      const device = req.body as any; // Assuming Device type is not directly imported here
       return this.nplService.saveDevice(this.protocolId, device).pipe(
         map(result => this.createHttpResponse(req, result))
       );
