@@ -64,6 +64,7 @@ notification deviceAssignedToEdge(deviceId: Text, edgeId: Text) returns Unit;
 notification deviceUnassignedFromEdge(deviceId: Text, edgeId: Text) returns Unit;
 notification devicesBulkImported(importedCount: Number, failedCount: Number) returns Unit;
 notification devicesBulkDeleted(deletedCount: Number, failedCount: Number) returns Unit;
+notification deviceLimitsUpdated(maxTenant: Number, maxCustomer: Number) returns Unit;
 
 // ========== DEVICE-SPECIFIC COMPOSED PROTOCOLS ==========
 
@@ -278,8 +279,34 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
     private var customerAssignments = mapOf<Text, CustomerAssignment>();
     private var edgeAssignments = mapOf<Text, EdgeAssignment>();
 
+    // Device validation constants
+    private var reservedNames = setOf("admin", "system", "root", "test", "default", "null", "undefined");
+    private var maxDevicesPerTenant = 10000;
+    private var maxDevicesPerCustomer = 1000;
+    
     /**
-     * Validate device data
+     * Check if device name is reserved
+     */
+    function isReservedName(name: Text) returns Boolean -> {
+        return reservedNames.contains(name);
+    };
+    
+    /**
+     * Get device count for tenant
+     */
+    function getDeviceCountForTenant(tenantId: Text) returns Number -> {
+        return devices.values().filter(function(d: Device) -> d.tenantId == tenantId).size();
+    };
+    
+    /**
+     * Get device count for customer
+     */
+    function getDeviceCountForCustomer(customerId: Text) returns Number -> {
+        return devices.values().filter(function(d: Device) -> d.customerId.isPresent() && d.customerId.getOrFail() == customerId).size();
+    };
+
+    /**
+     * Simple device validation using helper functions
      */
     function validateDevice(device: Device) returns Boolean -> {
         if (device.name.length() == 0) {
@@ -298,11 +325,26 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
     };
 
     /**
-     * Create or update a device with composed protocol creation
+     * Create or update a device with enhanced validation
      */
     @api
     permission[sys_admin | tenant_admin] saveDevice(device: Device) returns Device | active {
-        require(validateDevice(device), "Device validation failed");
+        // Comprehensive validation using require statements
+        require(device.name.length() >= 3, "Device name must be at least 3 characters long");
+        require(device.name.length() <= 255, "Device name cannot exceed 255 characters");
+        require(device.type.length() > 0, "Device type cannot be empty");
+        require(device.tenantId.length() > 0, "Tenant ID cannot be empty");
+        require(!isReservedName(device.name), "Device name is reserved and cannot be used");
+        
+        // Check tenant device limits
+        var currentTenantDevices = getDeviceCountForTenant(device.tenantId);
+        require(currentTenantDevices < maxDevicesPerTenant, "Tenant device limit exceeded");
+        
+        // Check customer device limits if customer is assigned
+        if (device.customerId.isPresent()) {
+            var currentCustomerDevices = getDeviceCountForCustomer(device.customerId.getOrFail());
+            require(currentCustomerDevices < maxDevicesPerCustomer, "Customer device limit exceeded");
+        };
         
         var isNewDevice = !devices.getOrNone(device.id).isPresent();
         
@@ -645,6 +687,42 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
     // ========== BULK OPERATIONS ==========
 
     /**
+     * Bulk create devices with validation
+     */
+    @api
+    permission[sys_admin | tenant_admin] bulkCreateDevices(devices: List<Device>) returns BulkImportResult | active {
+        var startTime = now();
+        var successCount = 0;
+        var failedCount = 0;
+        var errors = listOf<Text>();
+        var warnings = listOf<Text>();
+        
+        for (device in devices) {
+            try {
+                var savedDevice = saveDevice(device);
+                successCount = successCount + 1;
+            } catch (error) {
+                failedCount = failedCount + 1;
+                errors = errors.with("Device " + device.name + ": " + error.toText());
+            };
+        };
+        
+        var endTime = now();
+        var processingTime = endTime - startTime;
+        
+        return BulkImportResult(
+            totalProcessed = devices.size(),
+            successCount = successCount,
+            failedCount = failedCount,
+            skippedCount = 0,
+            errors = errors,
+            warnings = warnings,
+            importId = "bulk_" + startTime.toText(),
+            processingTime = processingTime
+        );
+    };
+    
+    /**
      * Process bulk device import
      */
     @api
@@ -704,6 +782,32 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
             successCount = deletedCount,
             failedCount = failedCount,
             errors = errors
+        );
+    };
+    
+    /**
+     * Update device limits configuration
+     */
+    @api
+    permission[sys_admin] updateDeviceLimits(maxTenant: Number, maxCustomer: Number) | active {
+        require(maxTenant > 0, "Max tenant devices must be positive");
+        require(maxCustomer > 0, "Max customer devices must be positive");
+        require(maxCustomer <= maxTenant, "Customer limit cannot exceed tenant limit");
+        
+        maxDevicesPerTenant = maxTenant;
+        maxDevicesPerCustomer = maxCustomer;
+        notify deviceLimitsUpdated(maxTenant, maxCustomer);
+    };
+    
+    /**
+     * Get current device limits
+     */
+    @api
+    permission[sys_admin | tenant_admin | customer_user] getDeviceLimits() returns DeviceLimits | active {
+        return DeviceLimits(
+            maxDevicesPerTenant = maxDevicesPerTenant,
+            maxDevicesPerCustomer = maxDevicesPerCustomer,
+            maxDevicesPerProfile = 5000
         );
     };
 
