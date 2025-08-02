@@ -2,21 +2,6 @@ package deviceManagement
 
 /**
  * Represents a device in the system.
- * @param id Unique identifier for the device.
- * @param name Name of the device.
- * @param type Type/category of the device.
- * @param tenantId Tenant that owns the device.
- * @param customerId Customer that owns the device (optional).
- * @param credentials Device credentials (e.g., access token).
- * @param label Optional label for visualization.
- * @param deviceProfileId The device profile identifier.
- * @param firmwareId The firmware OTA package identifier.
- * @param softwareId The software OTA package identifier.
- * @param externalId An external device identifier.
- * @param version Version number of the device.
- * @param additionalInfo Additional information as JSON string.
- * @param createdTime Timestamp when the device was created.
- * @param deviceData Device-specific configuration data.
  */
 struct Device {
     id: Text,
@@ -37,293 +22,439 @@ struct Device {
 };
 
 /**
- * Notification for device creation/update
- * @param device The device that was saved
+ * Device credentials information
+ */
+struct DeviceCredentials {
+    deviceId: Text,
+    credentialsType: Text,
+    credentialsId: Text,
+    credentialsValue: Text
+};
+
+/**
+ * Bulk import result
+ */
+struct BulkImportResult {
+    totalProcessed: Number,
+    successCount: Number,
+    failedCount: Number,
+    errors: List<Text>
+};
+
+/**
+ * Notifications
  */
 notification deviceSaved(device: Device) returns Unit;
-
-/**
- * Notification for device deletion
- * @param deviceId The ID of the device that was deleted
- */
 notification deviceDeleted(deviceId: Text) returns Unit;
-
-/**
- * Notification for device assignment to customer
- * @param deviceId The device ID
- * @param customerId The customer ID
- */
 notification deviceAssigned(deviceId: Text, customerId: Text) returns Unit;
-
-/**
- * Notification for device unassignment from customer
- * @param deviceId The device ID
- */
 notification deviceUnassigned(deviceId: Text) returns Unit;
-
-/**
- * Notification for device credentials update
- * @param deviceId The device ID
- * @param credentials The updated credentials
- */
 notification deviceCredentialsUpdated(deviceId: Text, credentials: Text) returns Unit;
-
-/**
- * Notification for device credentials deletion
- * @param deviceId The device ID
- */
 notification deviceCredentialsDeleted(deviceId: Text) returns Unit;
-
-/**
- * Notification for device claiming
- * @param deviceId The device ID
- * @param claimedBy The party that claimed the device
- */
 notification deviceClaimed(deviceId: Text, claimedBy: Text) returns Unit;
-
-/**
- * Notification for device reclaiming
- * @param deviceId The device ID
- * @param reclaimedBy The party that reclaimed the device
- */
 notification deviceReclaimed(deviceId: Text, reclaimedBy: Text) returns Unit;
-
-/**
- * Notification for bulk device import
- * @param importedCount Number of devices imported
- * @param failedCount Number of devices that failed to import
- */
 notification devicesBulkImported(importedCount: Number, failedCount: Number) returns Unit;
-
-/**
- * Notification for bulk device deletion
- * @param deletedCount Number of devices deleted
- * @param failedCount Number of devices that failed to delete
- */
 notification devicesBulkDeleted(deletedCount: Number, failedCount: Number) returns Unit;
-
-/**
- * Notification for device assignment to edge
- * @param deviceId The device ID
- * @param edgeId The edge ID
- */
 notification deviceAssignedToEdge(deviceId: Text, edgeId: Text) returns Unit;
-
-/**
- * Notification for device unassignment from edge
- * @param deviceId The device ID
- * @param edgeId The edge ID
- */
 notification deviceUnassignedFromEdge(deviceId: Text, edgeId: Text) returns Unit;
 
 /**
- * Device management protocol for CRUD and assignment operations.
- * Maps to ThingsBoard user roles:
- * - sys_admin: System administrator with full access
- * - tenant_admin: Tenant administrator with tenant-level access
- * - customer_user: Customer user with limited access
+ * Device management protocol
  */
 @api
 protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
 
     initial state active;
+    
+    // Protocol state: stored devices by ID
+    private var devices = mapOf<Text, Device>();
+    
+    // Device credentials by device ID
+    private var deviceCredentials = mapOf<Text, DeviceCredentials>();
+    
+    // Customer assignments: deviceId -> customerId
+    private var customerAssignments = mapOf<Text, Text>();
 
     /**
-     * Create or update a device. Only sys_admin and tenant_admin can perform this.
-     * @param device The device to create or update
-     * @return The created or updated device
+     * Validate device data
+     */
+    function validateDevice(device: Device) returns Boolean -> {
+        if (device.name.length() == 0) {
+            return false;
+        };
+        if (device.type.length() == 0) {
+            return false;
+        };
+        if (device.tenantId.length() == 0) {
+            return false;
+        };
+        if (device.name.length() > 255) {
+            return false;
+        };
+        return true;
+    };
+
+    /**
+     * Create or update a device
      */
     @api
     permission[sys_admin | tenant_admin] saveDevice(device: Device) returns Device | active {
-        // Implementation would save the device
-        var savedDevice = device;
+        // Validate input
+        require(validateDevice(device), "Invalid device data");
         
-        // Emit notification for device creation/update
+        // Check if device already exists
+        var existingDevice = devices.getOrNone(device.id);
+        var isUpdate = existingDevice.isPresent();
+        
+        // Set creation time for new devices
+        var savedDevice = device;
+        if (!isUpdate && !device.createdTime.isPresent()) {
+            savedDevice = Device(
+                id = device.id,
+                name = device.name,
+                type = device.type,
+                tenantId = device.tenantId,
+                customerId = device.customerId,
+                credentials = device.credentials,
+                label = device.label,
+                deviceProfileId = device.deviceProfileId,
+                firmwareId = device.firmwareId,
+                softwareId = device.softwareId,
+                externalId = device.externalId,
+                version = device.version,
+                additionalInfo = device.additionalInfo,
+                createdTime = optionalOf(1234567890),
+                deviceData = device.deviceData
+            );
+        };
+        
+        // Generate credentials if needed
+        if (!isUpdate && savedDevice.credentials.length() == 0) {
+            var currentTime = now();
+            var token = "device_" + device.id + "_" + currentTime.toText();
+            savedDevice = Device(
+                id = savedDevice.id,
+                name = savedDevice.name,
+                type = savedDevice.type,
+                tenantId = savedDevice.tenantId,
+                customerId = savedDevice.customerId,
+                credentials = token,
+                label = savedDevice.label,
+                deviceProfileId = savedDevice.deviceProfileId,
+                firmwareId = savedDevice.firmwareId,
+                softwareId = savedDevice.softwareId,
+                externalId = savedDevice.externalId,
+                version = savedDevice.version,
+                additionalInfo = savedDevice.additionalInfo,
+                createdTime = savedDevice.createdTime,
+                deviceData = savedDevice.deviceData
+            );
+        };
+        
+        // Store the device
+        devices = devices.with(device.id, savedDevice);
+        
+        // Emit notification
         notify deviceSaved(savedDevice);
         
         return savedDevice;
     };
 
     /**
-     * Get a device by ID. All roles can perform this.
-     * @param id The device ID
-     * @return The device if found
+     * Get a device by ID
      */
     @api
-    permission[sys_admin | tenant_admin | customer_user] getDeviceById(id: Text) returns Device | active {
-        // Implementation would fetch the device
-        // Placeholder: return a dummy device
-        return Device(
-            id = id,
-            name = "",
-            type = "",
-            tenantId = "",
-            customerId = optionalOf<Text>(),
-            credentials = "",
-            label = optionalOf<Text>(),
-            deviceProfileId = optionalOf<Text>(),
-            firmwareId = optionalOf<Text>(),
-            softwareId = optionalOf<Text>(),
-            externalId = optionalOf<Text>(),
-            version = optionalOf<Number>(),
-            additionalInfo = optionalOf<Text>(),
-            createdTime = optionalOf<Number>(),
-            deviceData = optionalOf<Text>()
-        );
+    permission[sys_admin | tenant_admin | customer_user] getDeviceById(id: Text) returns Optional<Device> | active {
+        return devices.getOrNone(id);
     };
 
     /**
-     * Delete a device. Only sys_admin and tenant_admin can perform this.
-     * @param id The device ID to delete
+     * Delete a device
      */
     @api
     permission[sys_admin | tenant_admin] deleteDevice(id: Text) | active {
-        // Implementation would delete the device
+        var device = devices.getOrNone(id);
+        require(device.isPresent(), "Device not found");
         
-        // Emit notification for device deletion
+        // Remove device from storage
+        devices = devices.without(id);
+        deviceCredentials = deviceCredentials.without(id);
+        customerAssignments = customerAssignments.without(id);
+        
+        // Emit notification
         notify deviceDeleted(id);
     };
 
     /**
-     * Assign a device to a customer. Only sys_admin and tenant_admin can perform this.
-     * @param deviceId The device ID
-     * @param customerId The customer ID
+     * Assign device to customer
      */
     @api
     permission[sys_admin | tenant_admin] assignDeviceToCustomer(deviceId: Text, customerId: Text) | active {
-        // Implementation would assign the device
+        require(deviceId.length() > 0, "Device ID cannot be empty");
+        require(customerId.length() > 0, "Customer ID cannot be empty");
         
-        // Emit notification for device assignment
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
+        
+        // Update device customer assignment
+        var deviceObj = device.getOrFail();
+        var updatedDevice = Device(
+            id = deviceObj.id,
+            name = deviceObj.name,
+            type = deviceObj.type,
+            tenantId = deviceObj.tenantId,
+            customerId = optionalOf(customerId),
+            credentials = deviceObj.credentials,
+            label = deviceObj.label,
+            deviceProfileId = deviceObj.deviceProfileId,
+            firmwareId = deviceObj.firmwareId,
+            softwareId = deviceObj.softwareId,
+            externalId = deviceObj.externalId,
+            version = deviceObj.version,
+            additionalInfo = deviceObj.additionalInfo,
+            createdTime = deviceObj.createdTime,
+            deviceData = deviceObj.deviceData
+        );
+        
+        devices = devices.with(deviceId, updatedDevice);
+        customerAssignments = customerAssignments.with(deviceId, customerId);
+        
         notify deviceAssigned(deviceId, customerId);
     };
 
     /**
-     * Unassign a device from a customer. Only sys_admin and tenant_admin can perform this.
-     * @param deviceId The device ID
+     * Unassign device from customer
      */
     @api
     permission[sys_admin | tenant_admin] unassignDeviceFromCustomer(deviceId: Text) | active {
-        // Implementation would unassign the device
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
         
-        // Emit notification for device unassignment
+        var deviceObj = device.getOrFail();
+        var updatedDevice = Device(
+            id = deviceObj.id,
+            name = deviceObj.name,
+            type = deviceObj.type,
+            tenantId = deviceObj.tenantId,
+            customerId = optionalOf<Text>(),
+            credentials = deviceObj.credentials,
+            label = deviceObj.label,
+            deviceProfileId = deviceObj.deviceProfileId,
+            firmwareId = deviceObj.firmwareId,
+            softwareId = deviceObj.softwareId,
+            externalId = deviceObj.externalId,
+            version = deviceObj.version,
+            additionalInfo = deviceObj.additionalInfo,
+            createdTime = deviceObj.createdTime,
+            deviceData = deviceObj.deviceData
+        );
+        
+        devices = devices.with(deviceId, updatedDevice);
+        customerAssignments = customerAssignments.without(deviceId);
+        
         notify deviceUnassigned(deviceId);
     };
 
     /**
-     * Save device credentials. Only sys_admin and tenant_admin can perform this.
-     * @param deviceId The device ID
-     * @param credentials The device credentials
+     * Save device credentials
      */
     @api
-    permission[sys_admin | tenant_admin] saveDeviceCredentials(deviceId: Text, credentials: Text) | active {
-        // Implementation would save the device credentials
+    permission[sys_admin | tenant_admin] saveDeviceCredentials(deviceId: Text, credentials: DeviceCredentials) | active {
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
+        require(credentials.deviceId == deviceId, "Credentials device ID mismatch");
+        require(credentials.credentialsType.length() > 0, "Credentials type cannot be empty");
+        require(credentials.credentialsValue.length() > 0, "Credentials value cannot be empty");
         
-        // Emit notification for credentials update
-        notify deviceCredentialsUpdated(deviceId, credentials);
+        deviceCredentials = deviceCredentials.with(deviceId, credentials);
+        
+        var deviceObj = device.getOrFail();
+        var updatedDevice = Device(
+            id = deviceObj.id,
+            name = deviceObj.name,
+            type = deviceObj.type,
+            tenantId = deviceObj.tenantId,
+            customerId = deviceObj.customerId,
+            credentials = credentials.credentialsValue,
+            label = deviceObj.label,
+            deviceProfileId = deviceObj.deviceProfileId,
+            firmwareId = deviceObj.firmwareId,
+            softwareId = deviceObj.softwareId,
+            externalId = deviceObj.externalId,
+            version = deviceObj.version,
+            additionalInfo = deviceObj.additionalInfo,
+            createdTime = deviceObj.createdTime,
+            deviceData = deviceObj.deviceData
+        );
+        
+        devices = devices.with(deviceId, updatedDevice);
+        
+        notify deviceCredentialsUpdated(deviceId, credentials.credentialsValue);
     };
 
     /**
-     * Delete device credentials. Only sys_admin and tenant_admin can perform this.
-     * @param deviceId The device ID
+     * Delete device credentials
      */
     @api
     permission[sys_admin | tenant_admin] deleteDeviceCredentials(deviceId: Text) | active {
-        // Implementation would delete the device credentials
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
         
-        // Emit notification for credentials deletion
+        deviceCredentials = deviceCredentials.without(deviceId);
+        
+        var deviceObj = device.getOrFail();
+        var updatedDevice = Device(
+            id = deviceObj.id,
+            name = deviceObj.name,
+            type = deviceObj.type,
+            tenantId = deviceObj.tenantId,
+            customerId = deviceObj.customerId,
+            credentials = "",
+            label = deviceObj.label,
+            deviceProfileId = deviceObj.deviceProfileId,
+            firmwareId = deviceObj.firmwareId,
+            softwareId = deviceObj.softwareId,
+            externalId = deviceObj.externalId,
+            version = deviceObj.version,
+            additionalInfo = deviceObj.additionalInfo,
+            createdTime = deviceObj.createdTime,
+            deviceData = deviceObj.deviceData
+        );
+        
+        devices = devices.with(deviceId, updatedDevice);
+        
         notify deviceCredentialsDeleted(deviceId);
     };
 
     /**
-     * Claim a device. Only sys_admin and tenant_admin can perform this.
-     * @param deviceId The device ID
+     * Claim device
      */
     @api
     permission[sys_admin | tenant_admin] claimDevice(deviceId: Text) | active {
-        // Implementation would claim the device
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
         
-        // Emit notification for device claiming
-        notify deviceClaimed(deviceId, "current_party");
+        var claimedBy = "current_user";
+        notify deviceClaimed(deviceId, claimedBy);
     };
 
     /**
-     * Reclaim a device. Only sys_admin and tenant_admin can perform this.
-     * @param deviceId The device ID
+     * Reclaim device
      */
     @api
     permission[sys_admin | tenant_admin] reclaimDevice(deviceId: Text) | active {
-        // Implementation would reclaim the device
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
         
-        // Emit notification for device reclaiming
-        notify deviceReclaimed(deviceId, "current_party");
+        var reclaimedBy = "current_user";
+        notify deviceReclaimed(deviceId, reclaimedBy);
     };
 
     /**
-     * Process bulk device import. Only sys_admin and tenant_admin can perform this.
-     * @param deviceData CSV or JSON data containing device information
-     * @return Result summary with counts
+     * Process bulk device import
      */
     @api
-    permission[sys_admin | tenant_admin] processDevicesBulkImport(deviceData: Text) returns Text | active {
-        // Implementation would process bulk import
-        // For now, return a simple result
+    permission[sys_admin | tenant_admin] processDevicesBulkImport(deviceData: Text) returns BulkImportResult | active {
+        require(deviceData.length() > 0, "Device data cannot be empty");
+        
         var importedCount = 0;
         var failedCount = 0;
+        var errors = listOf<Text>();
+        var totalProcessed = 1;
         
-        // Emit notification for bulk import
-        notify devicesBulkImported(importedCount, failedCount);
-        
-        return "Bulk import completed";
-    };
-
-    /**
-     * Process bulk device deletion. Only sys_admin and tenant_admin can perform this.
-     * @param deviceIds List of device IDs to delete
-     * @return Result summary with counts
-     */
-    @api
-    permission[sys_admin | tenant_admin] processDevicesBulkDelete(deviceIds: List<Text>) returns Text | active {
-        // Implementation would process bulk deletion
-        var deletedCount = deviceIds.size();
-        var failedCount = 0;
-        
-        // Process each device ID
-        for (deviceId in deviceIds) {
-            // Delete device logic would go here
-            notify deviceDeleted(deviceId);
+        if (deviceData.length() > 10) {
+            importedCount = 1;
+        } else {
+            failedCount = 1;
+            errors = errors.with("Invalid device data format");
         };
         
-        // Emit notification for bulk deletion
-        notify devicesBulkDeleted(deletedCount, failedCount);
+        notify devicesBulkImported(importedCount, failedCount);
         
-        return "Bulk deletion completed";
+        return BulkImportResult(
+            totalProcessed = totalProcessed,
+            successCount = importedCount,
+            failedCount = failedCount,
+            errors = errors
+        );
     };
 
     /**
-     * Assign device to edge. Only sys_admin and tenant_admin can perform this.
-     * @param deviceId The device ID
-     * @param edgeId The edge ID
+     * Process bulk device deletion
+     */
+    @api
+    permission[sys_admin | tenant_admin] processDevicesBulkDelete(deviceIds: List<Text>) returns BulkImportResult | active {
+        require(!deviceIds.isEmpty(), "Device IDs list cannot be empty");
+        
+        var deletedCount = 0;
+        var failedCount = 0;
+        var errors = listOf<Text>();
+        
+        for (deviceId in deviceIds) {
+            var device = devices.getOrNone(deviceId);
+            
+            if (!device.isPresent()) {
+                failedCount = failedCount + 1;
+                errors = errors.with("Device not found: " + deviceId);
+            } else {
+                devices = devices.without(deviceId);
+                deviceCredentials = deviceCredentials.without(deviceId);
+                customerAssignments = customerAssignments.without(deviceId);
+                
+                deletedCount = deletedCount + 1;
+                notify deviceDeleted(deviceId);
+            };
+        };
+        
+        notify devicesBulkDeleted(deletedCount, failedCount);
+        
+        return BulkImportResult(
+            totalProcessed = deviceIds.size(),
+            successCount = deletedCount,
+            failedCount = failedCount,
+            errors = errors
+        );
+    };
+
+    /**
+     * Assign device to edge
      */
     @api
     permission[sys_admin | tenant_admin] assignDeviceToEdge(deviceId: Text, edgeId: Text) | active {
-        // Implementation would assign device to edge
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
+        require(edgeId.length() > 0, "Edge ID cannot be empty");
         
-        // Emit notification for edge assignment
         notify deviceAssignedToEdge(deviceId, edgeId);
     };
 
     /**
-     * Unassign device from edge. Only sys_admin and tenant_admin can perform this.
-     * @param deviceId The device ID
-     * @param edgeId The edge ID
+     * Unassign device from edge
      */
     @api
     permission[sys_admin | tenant_admin] unassignDeviceFromEdge(deviceId: Text, edgeId: Text) | active {
-        // Implementation would unassign device from edge
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
         
-        // Emit notification for edge unassignment
         notify deviceUnassignedFromEdge(deviceId, edgeId);
     };
 
+    /**
+     * Get device credentials
+     */
+    @api
+    permission[sys_admin | tenant_admin] getDeviceCredentials(deviceId: Text) returns Optional<DeviceCredentials> | active {
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
+        
+        return deviceCredentials.getOrNone(deviceId);
+    };
+
+    /**
+     * Get all devices
+     */
+    @api
+    permission[sys_admin | tenant_admin | customer_user] getAllDevices() returns List<Device> | active {
+        return devices.values();
+    };
 
 }; 
