@@ -1,14 +1,10 @@
 import { Injectable } from '@angular/core';
-import { HttpRequest, HttpResponse, HttpEvent } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { HttpRequest, HttpEvent, HttpResponse } from '@angular/common/http';
+import { Observable, of } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { DeviceGraphQLService, DevicesConnection } from './device-graphql.service';
-import { NplClientService } from './npl-client.service';
 
-export interface TransformationResult {
-  observable: Observable<HttpEvent<any>>;
-  shouldTransform: boolean;
-}
+import { NplClientService } from './npl-client.service';
+import { DeviceGraphQLService } from './device-graphql.service';
 
 @Injectable({
   providedIn: 'root'
@@ -16,154 +12,205 @@ export interface TransformationResult {
 export class RequestTransformerService {
   
   // We'll need to store a protocol instance ID for NPL operations
-  private protocolId: string | null = null;
+  private protocolId: string | null = null
 
   constructor(
-    private graphqlService: DeviceGraphQLService,
-    private nplService: NplClientService
-  ) {
-    this.initializeProtocolInstance();
-  }
+    private nplService: NplClientService,
+    private graphqlService: DeviceGraphQLService
+  ) {}
 
   /**
-   * Initialize NPL protocol instance (in a real app, this might come from user context)
-   */
-  private async initializeProtocolInstance(): Promise<void> {
-    try {
-      // For demo purposes, create a simple protocol instance
-      const parties = [
-        {
-          entity: { email: ['tenant@thingsboard.org'] },
-          access: {}
-        }
-      ];
-
-      const instance = await this.nplService.instantiateProtocol(parties).toPromise();
-      this.protocolId = instance?.protocolId || null;
-      console.log('NPL Protocol instance initialized:', this.protocolId);
-    } catch (error) {
-      console.error('Failed to initialize NPL protocol instance:', error);
-    }
-  }
-
-  /**
-   * Check if this is a device-related read operation
+   * Check if this is a device-related read operation that should go to GraphQL
    */
   isReadOperation(req: HttpRequest<any>): boolean {
     const url = req.url;
-    return req.method === 'GET' && (
-      !!url.match(/\/api\/device\/[^/]+$/) ||                    // GET /api/device/{id}
-      url.includes('/api/tenant/devices') ||                   // GET /api/tenant/devices
-      (url.includes('/api/customer') && url.includes('/devices')) ||  // GET /api/customer/{customerId}/devices
-      (url.includes('/api/devices') && url.includes('textSearch')) || // GET /api/devices?textSearch=X
-      url.includes('/api/tenant/device-infos') ||              // GET /api/tenant/device-infos
-      (url.includes('/api/customer') && url.includes('/device-infos')) || // GET /api/customer/{customerId}/device-infos
-      url.includes('/api/device/types') ||                    // NEW: GET /api/device/types
-      url.includes('/api/devices/count') ||                   // NEW: GET /api/devices/count
-      url.includes('/api/devices/by-profile') ||              // NEW: GET /api/devices/by-profile/{profileId}
-      url.includes('/api/device-stats')                       // NEW: GET /api/device-stats
+    const method = req.method;
+
+    if (method !== 'GET') return false;
+
+    // List of device read endpoints that should be routed to GraphQL
+    const readEndpoints = [
+      // Basic device queries
+      /^\/api\/device\/([^\/]+)$/,                    // GET /api/device/{id}
+      /^\/api\/device\/info\/([^\/]+)$/,              // GET /api/device/info/{id}
+      
+      // Tenant device queries
+      /^\/api\/tenant\/devices$/,                     // GET /api/tenant/devices
+      /^\/api\/tenant\/deviceInfos$/,                 // GET /api/tenant/deviceInfos
+      
+      // Customer device queries
+      /^\/api\/customer\/([^\/]+)\/devices$/,         // GET /api/customer/{id}/devices
+      /^\/api\/customer\/([^\/]+)\/deviceInfos$/,     // GET /api/customer/{id}/deviceInfos
+      
+      // Device credentials
+      /^\/api\/device\/([^\/]+)\/credentials$/,       // GET /api/device/{id}/credentials
+      
+      // Device queries and searches
+      /^\/api\/devices$/,                             // GET /api/devices (with params)
+      /^\/api\/device\/types$/,                       // GET /api/device/types
+      
+      // Device counts
+      /^\/api\/devices\/count\/([^\/]+)\/([^\/]+)$/,  // GET /api/devices/count/{type}/{profileId}
+    ];
+
+    return readEndpoints.some(pattern => pattern.test(url));
+  }
+
+  /**
+   * Check if this is a device-related write operation that should go to NPL
+   */
+  isWriteOperation(req: HttpRequest<any>): boolean {
+    const url = req.url;
+    const method = req.method;
+
+    if (method === 'GET') return false;
+
+    // List of device write endpoints that should be routed to NPL
+    const writeEndpoints = [
+      // Device CRUD
+      { pattern: /^\/api\/device$/, methods: ['POST', 'PUT'] },                           // Create/Update device
+      { pattern: /^\/api\/device\/([^\/]+)$/, methods: ['DELETE'] },                     // Delete device
+      
+      // Device-Customer assignment
+      { pattern: /^\/api\/customer\/([^\/]+)\/device\/([^\/]+)$/, methods: ['POST'] },   // Assign to customer
+      { pattern: /^\/api\/customer\/device\/([^\/]+)$/, methods: ['DELETE'] },           // Unassign from customer
+      
+      // Device credentials
+      { pattern: /^\/api\/device\/credentials$/, methods: ['POST'] },                    // Save credentials
+      
+      // Device claiming
+      { pattern: /^\/api\/customer\/device\/([^\/]+)\/claim$/, methods: ['POST', 'DELETE'] }, // Claim/Reclaim
+    ];
+
+    return writeEndpoints.some(endpoint => 
+      endpoint.pattern.test(url) && endpoint.methods.includes(method)
     );
   }
 
   /**
-   * Check if this is a device-related write operation
-   */
-  isWriteOperation(req: HttpRequest<any>): boolean {
-    const url = req.url;
-    return url.includes('/api/device') && (
-      req.method === 'POST' ||    // Create device
-      req.method === 'PUT' ||     // Update device  
-      req.method === 'DELETE'     // Delete device
-    ) && !url.includes('/credentials') && !url.includes('/claim'); // Exclude credential/claim operations for now
-  }
-
-  /**
-   * Transform GET request to GraphQL query
+   * Transform a read operation to a GraphQL query
    */
   transformToGraphQL(req: HttpRequest<any>): Observable<HttpEvent<any>> {
-    const url = req.url;
-    const params = this.extractQueryParams(url);
-
-    // Get device types with counts
-    if (url.includes('/api/device/types')) {
-      return this.graphqlService.getDeviceTypes().pipe(
-        map(types => this.createHttpResponse(req, {
-          data: types.map(t => ({ type: t.type, count: t.count }))
-        }))
-      );
-    }
-
-    // Get devices by profile
-    const profileMatch = url.match(/\/api\/devices\/by-profile\/([^/]+)$/);
-    if (profileMatch) {
-      const profileId = profileMatch[1];
-      const pageSize = parseInt(params['pageSize']) || 20;
-      const page = parseInt(params['page']) || 0;
-
-      return this.graphqlService.getDevicesByProfile(profileId, pageSize, page).pipe(
-        map(connection => this.createHttpResponse(req, this.transformConnectionToThingsBoard(connection)))
-      );
-    }
-
-    // Get device statistics
-    if (url.includes('/api/device-stats')) {
-      return this.graphqlService.getDeviceStatistics().pipe(
-        map(stats => this.createHttpResponse(req, stats))
-      );
-    }
-
-    // Advanced search with multiple criteria
-    if (url.includes('/api/devices') && url.includes('textSearch')) {
-      const criteria = {
-        textSearch: params['textSearch'],
-        type: params['type'],
-        profileId: params['profileId'],
-        hasCredentials: params['hasCredentials'] === 'true'
-      };
-
-      return this.graphqlService.searchDevicesAdvanced(criteria).pipe(
-        map(connection => this.createHttpResponse(req, this.transformConnectionToThingsBoard(connection)))
-      );
-    }
-
-    // GET /api/device/{id}
-    const deviceIdMatch = url.match(/\/api\/device\/([^/]+)$/);
-    if (deviceIdMatch) {
-      const deviceId = deviceIdMatch[1];
+    const fullUrl = req.url;
+    // Extract pathname without query parameters for pattern matching
+    const url = fullUrl.split('?')[0];
+    
+    // GET /api/device/{deviceId}
+    const deviceByIdMatch = url.match(/^\/api\/device\/([^\/]+)$/);
+    if (deviceByIdMatch) {
+      const deviceId = deviceByIdMatch[1];
       return this.graphqlService.getDeviceById(deviceId).pipe(
         map(device => this.createHttpResponse(req, device))
       );
     }
 
-    // GET /api/tenant/devices with pagination
-    if (url.includes('/api/tenant/devices')) {
-      const pageSize = parseInt(params['pageSize']) || 20;
-      const page = parseInt(params['page']) || 0;
-      
-      return this.graphqlService.getTenantDevices(pageSize, page).pipe(
-        map(connection => this.createHttpResponse(req, this.transformConnectionToThingsBoard(connection)))
+    // GET /api/device/info/{deviceId}
+    const deviceInfoMatch = url.match(/^\/api\/device\/info\/([^\/]+)$/);
+    if (deviceInfoMatch) {
+      const deviceId = deviceInfoMatch[1];
+      return this.graphqlService.getDeviceInfoById(deviceId).pipe(
+        map(deviceInfo => this.createHttpResponse(req, deviceInfo))
+      );
+    }
+
+    // GET /api/tenant/devices
+    if (url === '/api/tenant/devices') {
+      const pageSize = this.getQueryParam(req, 'pageSize') || 10;
+      const page = this.getQueryParam(req, 'page') || 0;
+      return this.graphqlService.getTenantDevices(+pageSize, +page).pipe(
+        map(connection => this.transformConnectionToThingsBoard(connection))
+      );
+    }
+
+    // GET /api/tenant/deviceInfos
+    if (url === '/api/tenant/deviceInfos') {
+      const pageSize = this.getQueryParam(req, 'pageSize') || 10;
+      const page = this.getQueryParam(req, 'page') || 0;
+      return this.graphqlService.getTenantDevices(+pageSize, +page).pipe(
+        map(connection => this.createHttpResponse(req, this.transformConnectionToDeviceInfos(connection)))
       );
     }
 
     // GET /api/customer/{customerId}/devices
-    const customerDevicesMatch = url.match(/\/api\/customer\/([^/]+)\/devices/);
+    const customerDevicesMatch = url.match(/^\/api\/customer\/([^\/]+)\/devices$/);
     if (customerDevicesMatch) {
       const customerId = customerDevicesMatch[1];
-      const pageSize = parseInt(params['pageSize']) || 20;
-      const page = parseInt(params['page']) || 0;
-
-      return this.graphqlService.getTenantDevices(pageSize, page, {
-        field: { equalTo: "customerId" },
-        value: { equalTo: customerId }
-      }).pipe(
-        map(connection => this.createHttpResponse(req, this.transformConnectionToThingsBoard(connection)))
+      const pageSize = this.getQueryParam(req, 'pageSize') || 10;
+      const page = this.getQueryParam(req, 'page') || 0;
+      return this.graphqlService.getCustomerDevices(customerId, +pageSize, +page).pipe(
+        map(connection => this.transformConnectionToThingsBoard(connection))
       );
     }
 
-    // Default fallback
-    return this.graphqlService.getTenantDevices().pipe(
-      map(connection => this.createHttpResponse(req, this.transformConnectionToThingsBoard(connection)))
-    );
+    // GET /api/customer/{customerId}/deviceInfos
+    const customerDeviceInfosMatch = url.match(/^\/api\/customer\/([^\/]+)\/deviceInfos$/);
+    if (customerDeviceInfosMatch) {
+      const customerId = customerDeviceInfosMatch[1];
+      const pageSize = this.getQueryParam(req, 'pageSize') || 10;
+      const page = this.getQueryParam(req, 'page') || 0;
+      return this.graphqlService.getCustomerDeviceInfos(customerId, +pageSize, +page).pipe(
+        map(deviceInfos => this.createHttpResponse(req, { data: deviceInfos, totalElements: deviceInfos.length }))
+      );
+    }
+
+    // GET /api/device/{deviceId}/credentials
+    const deviceCredentialsMatch = url.match(/^\/api\/device\/([^\/]+)\/credentials$/);
+    if (deviceCredentialsMatch) {
+      const deviceId = deviceCredentialsMatch[1];
+      return this.graphqlService.getDeviceCredentials(deviceId).pipe(
+        map(credentials => this.createHttpResponse(req, credentials))
+      );
+    }
+
+    // GET /api/devices with query parameters
+    if (url.startsWith('/api/devices')) {
+      const deviceIds = this.getQueryParam(req, 'deviceIds');
+      const deviceName = this.getQueryParam(req, 'deviceName');
+      
+      // GET /api/devices?deviceIds=x,y,z
+      if (deviceIds) {
+        const idsArray = deviceIds.split(',');
+        return this.graphqlService.getDevicesByIds(idsArray).pipe(
+          map(devices => this.createHttpResponse(req, devices))
+        );
+      }
+      
+      // GET /api/devices?deviceName=xyz
+      if (deviceName) {
+        const pageSize = this.getQueryParam(req, 'pageSize') || 10;
+        const page = this.getQueryParam(req, 'page') || 0;
+        return this.graphqlService.getDevicesByQuery(deviceName, +pageSize, +page).pipe(
+          map(connection => this.transformConnectionToThingsBoard(connection))
+        );
+      }
+      
+      // Default tenant devices for /api/devices
+      const pageSize = this.getQueryParam(req, 'pageSize') || 10;
+      const page = this.getQueryParam(req, 'page') || 0;
+      return this.graphqlService.getTenantDevices(+pageSize, +page).pipe(
+        map(connection => this.transformConnectionToThingsBoard(connection))
+      );
+    }
+
+    // GET /api/device/types
+    if (url === '/api/device/types') {
+      return this.graphqlService.getDeviceTypes().pipe(
+        map(types => this.createHttpResponse(req, types))
+      );
+    }
+
+    // GET /api/devices/count/{otaPackageType}/{deviceProfileId}
+    const deviceCountMatch = url.match(/^\/api\/devices\/count\/([^\/]+)\/([^\/]+)$/);
+    if (deviceCountMatch) {
+      const otaPackageType = deviceCountMatch[1];
+      const deviceProfileId = deviceCountMatch[2];
+      return this.graphqlService.countDevicesByProfile(deviceProfileId, otaPackageType).pipe(
+        map(count => this.createHttpResponse(req, count))
+      );
+    }
+
+    // If no GraphQL route matches, throw an error
+    throw new Error(`No GraphQL route found for: ${fullUrl}`);
   }
 
   /**
@@ -221,65 +268,145 @@ export class RequestTransformerService {
       );
     }
 
-    throw new Error(`Unsupported NPL operation: ${method} ${url}`);
-  }
-
-  /**
-   * Extract query parameters from URL
-   */
-  private extractQueryParams(url: string): { [key: string]: string } {
-    const params: { [key: string]: string } = {};
-    const queryString = url.split('?')[1];
-    
-    if (queryString) {
-      queryString.split('&').forEach(param => {
-        const [key, value] = param.split('=');
-        if (key && value) {
-          params[decodeURIComponent(key)] = decodeURIComponent(value);
-        }
-      });
+    // POST /api/device/credentials - Save device credentials
+    if (method === 'POST' && url === '/api/device/credentials') {
+      const credentials = req.body as any;
+      return this.nplService.updateDeviceCredentials(this.protocolId, credentials.deviceId, credentials.credentialsValue).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
     }
-    
-    return params;
+
+    // POST /api/customer/device/{deviceName}/claim - Claim device
+    const claimMatch = url.match(/\/api\/customer\/device\/([^/]+)\/claim$/);
+    if (method === 'POST' && claimMatch) {
+      const deviceName = claimMatch[1];
+      const secretKey = req.body?.secretKey || '';
+      return this.nplService.claimDevice(this.protocolId, deviceName, secretKey).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // DELETE /api/customer/device/{deviceName}/claim - Reclaim device
+    if (method === 'DELETE' && claimMatch) {
+      const deviceName = claimMatch[1];
+      return this.nplService.reclaimDevice(this.protocolId, deviceName).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // If no specific handler found, throw error
+    throw new Error(`Unhandled NPL transformation for: ${method} ${url}`);
   }
 
   /**
-   * Transform GraphQL connection format to ThingsBoard API format
+   * Initialize NPL protocol instance
    */
-  private transformConnectionToThingsBoard(connection: DevicesConnection): any {
+  initializeProtocol(): Observable<string> {
+    // Create a simple protocol instance for the current user
+    const parties = [
+      {
+        entity: { email: ['tenant@thingsboard.org'] },
+        access: {}
+      }
+    ];
+
+    return this.nplService.instantiateProtocol(parties).pipe(
+      map((instance: any) => {
+        this.protocolId = instance.protocolId;
+        if (!this.protocolId) {
+          throw new Error('Failed to initialize NPL protocol instance');
+        }
+        return this.protocolId;
+      })
+    );
+  }
+
+  private createHttpResponse<T>(req: HttpRequest<any>, body: T): HttpResponse<T> {
+    return new HttpResponse({
+      body,
+      headers: req.headers,
+      status: 200,
+      statusText: 'OK',
+      url: req.url
+    });
+  }
+
+  private getQueryParam(req: HttpRequest<any>, param: string): string | null {
+    const url = new URL(req.url, 'http://localhost');
+    return url.searchParams.get(param);
+  }
+
+  /**
+   * Transform GraphQL DevicesConnection to ThingsBoard PageData format
+   */
+  private transformConnectionToThingsBoard(connection: any): any {
+    if (!connection) {
+      return { data: [], totalElements: 0, totalPages: 0 };
+    }
+
+    // Group edges by protocolId to reconstruct complete device objects
+    const deviceGroups = new Map<string, any>();
+    
+    connection.edges?.forEach((edge: any) => {
+      const protocolId = edge.node.protocolId;
+      if (!deviceGroups.has(protocolId)) {
+        deviceGroups.set(protocolId, {});
+      }
+      const device = deviceGroups.get(protocolId);
+      device[edge.node.field] = edge.node.value;
+      device.protocolId = protocolId;
+    });
+
+    const devices = Array.from(deviceGroups.values());
+
     return {
-      data: connection.edges.map(edge => edge.node),
-      totalPages: Math.ceil(connection.totalCount / 20), // Assuming 20 per page
-      totalElements: connection.totalCount,
-      hasNext: connection.pageInfo.hasNextPage,
-      hasPrevious: connection.pageInfo.hasPreviousPage
+      data: devices,
+      totalElements: connection.totalCount || 0,
+      totalPages: Math.ceil((connection.totalCount || 0) / 10), // Assuming default page size
+      hasNext: connection.pageInfo?.hasNextPage || false
     };
   }
 
   /**
-   * Create HTTP response object
+   * Transform GraphQL DevicesConnection to DeviceInfo array
    */
-  private createHttpResponse(req: HttpRequest<any>, body: any): HttpEvent<any> {
-    return new HttpResponse({
-      url: req.url,
-      status: 200,
-      statusText: 'OK',
-      body: body,
-      headers: req.headers
+  private transformConnectionToDeviceInfos(connection: any): any {
+    if (!connection) {
+      return { data: [], totalElements: 0 };
+    }
+
+    // Group edges by protocolId to reconstruct complete device objects
+    const deviceGroups = new Map<string, any>();
+    
+    connection.edges?.forEach((edge: any) => {
+      const protocolId = edge.node.protocolId;
+      if (!deviceGroups.has(protocolId)) {
+        deviceGroups.set(protocolId, {});
+      }
+      const device = deviceGroups.get(protocolId);
+      device[edge.node.field] = edge.node.value;
+      device.protocolId = protocolId;
     });
-  }
 
-  /**
-   * Get the current protocol ID (for testing/debugging)
-   */
-  getProtocolId(): string | null {
-    return this.protocolId;
-  }
+    // Convert to DeviceInfo format
+    const deviceInfos = Array.from(deviceGroups.values()).map(device => ({
+      id: device.id,
+      name: device.name,
+      type: device.type,
+      label: device.label,
+      deviceProfileId: device.deviceProfileId,
+      deviceProfileName: device.deviceProfileName || device.type, // Fallback
+      customerId: device.customerId,
+      customerTitle: device.customerTitle,
+      active: true, // Would need additional logic
+      lastActivityTime: device.createdTime
+    }));
 
-  /**
-   * Manually set protocol ID (for testing)
-   */
-  setProtocolId(protocolId: string): void {
-    this.protocolId = protocolId;
+    return {
+      data: deviceInfos,
+      totalElements: connection.totalCount || 0,
+      totalPages: Math.ceil((connection.totalCount || 0) / 10),
+      hasNext: connection.pageInfo?.hasNextPage || false
+    };
   }
 } 

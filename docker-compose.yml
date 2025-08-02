@@ -154,7 +154,7 @@ services:
     environment:
       TB_HOST: "mytb-core"
       TB_PORT: "8080"
-      TB_ENABLE_PROXY: "true"
+      TB_ENABLE_PROXY: "false"  # Disable internal proxy to allow NPL overlay interception
     networks:
       - npl-network
 

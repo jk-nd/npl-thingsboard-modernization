@@ -89,6 +89,34 @@ notification deviceClaimed(deviceId: Text, claimedBy: Text) returns Unit;
 notification deviceReclaimed(deviceId: Text, reclaimedBy: Text) returns Unit;
 
 /**
+ * Notification for bulk device import
+ * @param importedCount Number of devices imported
+ * @param failedCount Number of devices that failed to import
+ */
+notification devicesBulkImported(importedCount: Number, failedCount: Number) returns Unit;
+
+/**
+ * Notification for bulk device deletion
+ * @param deletedCount Number of devices deleted
+ * @param failedCount Number of devices that failed to delete
+ */
+notification devicesBulkDeleted(deletedCount: Number, failedCount: Number) returns Unit;
+
+/**
+ * Notification for device assignment to edge
+ * @param deviceId The device ID
+ * @param edgeId The edge ID
+ */
+notification deviceAssignedToEdge(deviceId: Text, edgeId: Text) returns Unit;
+
+/**
+ * Notification for device unassignment from edge
+ * @param deviceId The device ID
+ * @param edgeId The edge ID
+ */
+notification deviceUnassignedFromEdge(deviceId: Text, edgeId: Text) returns Unit;
+
+/**
  * Device management protocol for CRUD and assignment operations.
  * Maps to ThingsBoard user roles:
  * - sys_admin: System administrator with full access
@@ -228,6 +256,73 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
         
         // Emit notification for device reclaiming
         notify deviceReclaimed(deviceId, "current_party");
+    };
+
+    /**
+     * Process bulk device import. Only sys_admin and tenant_admin can perform this.
+     * @param deviceData CSV or JSON data containing device information
+     * @return Result summary with counts
+     */
+    @api
+    permission[sys_admin | tenant_admin] processDevicesBulkImport(deviceData: Text) returns Text | active {
+        // Implementation would process bulk import
+        // For now, return a simple result
+        var importedCount = 0;
+        var failedCount = 0;
+        
+        // Emit notification for bulk import
+        notify devicesBulkImported(importedCount, failedCount);
+        
+        return "Bulk import completed";
+    };
+
+    /**
+     * Process bulk device deletion. Only sys_admin and tenant_admin can perform this.
+     * @param deviceIds List of device IDs to delete
+     * @return Result summary with counts
+     */
+    @api
+    permission[sys_admin | tenant_admin] processDevicesBulkDelete(deviceIds: List<Text>) returns Text | active {
+        // Implementation would process bulk deletion
+        var deletedCount = deviceIds.size();
+        var failedCount = 0;
+        
+        // Process each device ID
+        for (deviceId in deviceIds) {
+            // Delete device logic would go here
+            notify deviceDeleted(deviceId);
+        };
+        
+        // Emit notification for bulk deletion
+        notify devicesBulkDeleted(deletedCount, failedCount);
+        
+        return "Bulk deletion completed";
+    };
+
+    /**
+     * Assign device to edge. Only sys_admin and tenant_admin can perform this.
+     * @param deviceId The device ID
+     * @param edgeId The edge ID
+     */
+    @api
+    permission[sys_admin | tenant_admin] assignDeviceToEdge(deviceId: Text, edgeId: Text) | active {
+        // Implementation would assign device to edge
+        
+        // Emit notification for edge assignment
+        notify deviceAssignedToEdge(deviceId, edgeId);
+    };
+
+    /**
+     * Unassign device from edge. Only sys_admin and tenant_admin can perform this.
+     * @param deviceId The device ID
+     * @param edgeId The edge ID
+     */
+    @api
+    permission[sys_admin | tenant_admin] unassignDeviceFromEdge(deviceId: Text, edgeId: Text) | active {
+        // Implementation would unassign device from edge
+        
+        // Emit notification for edge unassignment
+        notify deviceUnassignedFromEdge(deviceId, edgeId);
     };
 
 

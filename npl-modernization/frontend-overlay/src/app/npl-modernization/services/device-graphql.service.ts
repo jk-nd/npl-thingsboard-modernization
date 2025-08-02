@@ -41,8 +41,26 @@ export interface DeviceStatistics {
   recent: Array<{ node: { protocolId: string; created: string } }>;
 }
 
-interface GraphQLResponse<T> {
-  data: T;
+export interface DeviceInfo {
+  id: string;
+  name: string;
+  type: string;
+  label?: string;
+  deviceProfileName?: string;
+  deviceProfileId?: string;
+  customerTitle?: string;
+  customerId?: string;
+  active?: boolean;
+  lastActivityTime?: number;
+}
+
+export interface DeviceCredentials {
+  id: string;
+  deviceId: string;
+  credentialsType: string;
+  credentialsId?: string;
+  credentialsValue?: string;
+  version?: number;
 }
 
 @Injectable({
@@ -53,7 +71,7 @@ export class DeviceGraphQLService {
 
   // Basic device queries (existing)
   getDeviceById(deviceId: string): Observable<any> {
-    return this.apollo.query<GraphQLResponse<{ protocolFieldsStructs: { edges: DeviceEdge[] } }>>({
+    return this.apollo.query({
       query: gql`
         query GetDevice($deviceId: String!) {
           protocolFieldsStructs(
@@ -74,13 +92,225 @@ export class DeviceGraphQLService {
       `,
       variables: { deviceId }
     }).pipe(
-      map(result => this.transformDeviceResult(result))
+      map((result: any) => this.transformDeviceResult(result))
+    );
+  }
+
+  /**
+   * Get device info by ID - enhanced version with additional metadata
+   * Maps to: GET /api/device/info/{deviceId}
+   */
+  getDeviceInfoById(deviceId: string): Observable<DeviceInfo | null> {
+    return this.apollo.query({
+      query: gql`
+        query GetDeviceInfo($deviceId: String!) {
+          protocolFieldsStructs(
+            filter: {
+              field: { equalTo: "id" },
+              value: { equalTo: $deviceId }
+            }
+          ) {
+            edges {
+              node {
+                value
+                protocolId
+                field
+                created
+              }
+            }
+          }
+        }
+      `,
+      variables: { deviceId }
+    }).pipe(
+      map((result: any) => this.transformDeviceInfoResult(result))
+    );
+  }
+
+  /**
+   * Get devices by customer ID
+   * Maps to: GET /api/customer/{customerId}/devices
+   */
+  getCustomerDevices(customerId: string, pageSize: number = 10, page: number = 0): Observable<DevicesConnection> {
+    return this.apollo.query({
+      query: gql`
+        query GetCustomerDevices($customerId: String!, $first: Int!, $offset: Int!) {
+          protocolFieldsStructs(
+            first: $first
+            offset: $offset
+            filter: {
+              field: { equalTo: "customerId" },
+              value: { equalTo: $customerId }
+            }
+          ) {
+            edges {
+              node {
+                value
+                protocolId
+                field
+                created
+              }
+            }
+            totalCount
+            pageInfo {
+              hasNextPage
+              hasPreviousPage
+            }
+          }
+        }
+      `,
+      variables: { customerId, first: pageSize, offset: page * pageSize }
+    }).pipe(
+      map((result: any) => result.data?.protocolFieldsStructs)
+    );
+  }
+
+  /**
+   * Get customer device infos with enhanced metadata
+   * Maps to: GET /api/customer/{customerId}/deviceInfos
+   */
+  getCustomerDeviceInfos(customerId: string, pageSize: number = 10, page: number = 0): Observable<DeviceInfo[]> {
+    return this.getCustomerDevices(customerId, pageSize, page).pipe(
+      map(connection => this.transformDeviceInfosFromConnection(connection))
+    );
+  }
+
+  /**
+   * Get device credentials by device ID
+   * Maps to: GET /api/device/{deviceId}/credentials
+   */
+  getDeviceCredentials(deviceId: string): Observable<DeviceCredentials | null> {
+    return this.apollo.query({
+      query: gql`
+        query GetDeviceCredentials($deviceId: String!) {
+          protocolFieldsStructs(
+            filter: {
+              field: { equalTo: "id" },
+              value: { equalTo: $deviceId }
+            }
+          ) {
+            edges {
+              node {
+                value
+                protocolId
+                field
+              }
+            }
+          }
+        }
+      `,
+      variables: { deviceId }
+    }).pipe(
+      map((result: any) => this.transformDeviceCredentialsResult(result, deviceId))
+    );
+  }
+
+  /**
+   * Get devices by multiple IDs
+   * Maps to: GET /api/devices?deviceIds=x,y,z
+   */
+  getDevicesByIds(deviceIds: string[]): Observable<any[]> {
+    return this.apollo.query({
+      query: gql`
+        query GetDevicesByIds($deviceIds: [String!]!) {
+          protocolFieldsStructs(
+            filter: {
+              field: { equalTo: "id" },
+              value: { in: $deviceIds }
+            }
+          ) {
+            edges {
+              node {
+                value
+                protocolId
+                field
+              }
+            }
+          }
+        }
+      `,
+      variables: { deviceIds }
+    }).pipe(
+      map((result: any) => this.transformMultipleDevicesResult(result))
+    );
+  }
+
+  /**
+   * Get devices by name query
+   * Maps to: GET /api/devices?deviceName=xyz
+   */
+  getDevicesByQuery(query: string, pageSize: number = 10, page: number = 0): Observable<DevicesConnection> {
+    return this.apollo.query({
+      query: gql`
+        query GetDevicesByQuery($query: String!, $first: Int!, $offset: Int!) {
+          protocolFieldsStructs(
+            first: $first
+            offset: $offset
+            filter: {
+              or: [
+                { field: { equalTo: "name" }, value: { includesInsensitive: $query } },
+                { field: { equalTo: "label" }, value: { includesInsensitive: $query } },
+                { field: { equalTo: "type" }, value: { includesInsensitive: $query } }
+              ]
+            }
+          ) {
+            edges {
+              node {
+                value
+                protocolId
+                field
+                created
+              }
+            }
+            totalCount
+            pageInfo {
+              hasNextPage
+              hasPreviousPage
+            }
+          }
+        }
+      `,
+      variables: { query, first: pageSize, offset: page * pageSize }
+    }).pipe(
+      map((result: any) => result.data?.protocolFieldsStructs)
+    );
+  }
+
+  /**
+   * Count devices by device profile and OTA package type
+   * Maps to: GET /api/devices/count/{otaPackageType}/{deviceProfileId}
+   */
+  countDevicesByProfile(deviceProfileId: string, otaPackageType?: string): Observable<number> {
+    const filter: any = {
+      field: { equalTo: "deviceProfileId" },
+      value: { equalTo: deviceProfileId }
+    };
+
+    // Add OTA package type filter if provided
+    if (otaPackageType) {
+      filter.and = [{
+        field: { equalTo: otaPackageType === 'FIRMWARE' ? "firmwareId" : "softwareId" },
+        value: { isNotNull: true }
+      }];
+    }
+
+    return this.apollo.query({
+      query: gql`
+        query CountDevicesByProfile($filter: ProtocolFieldsStructFilter!) {
+          protocolFieldsStructs(filter: $filter) {
+            totalCount
+          }
+        }
+      `,
+      variables: { filter }
+    }).pipe(
+      map((result: any) => result.data?.protocolFieldsStructs?.totalCount || 0)
     );
   }
 
   // Enhanced device listing with filtering and pagination
   getTenantDevices(pageSize: number = 10, page: number = 0, filters?: any): Observable<DevicesConnection> {
-    return this.apollo.query<GraphQLResponse<{ protocolFieldsStructs: DevicesConnection }>>({
+    return this.apollo.query({
       query: gql`
         query GetDevices($first: Int!, $offset: Int!, $filter: ProtocolFieldsStructFilter) {
           protocolFieldsStructs(
@@ -110,13 +340,13 @@ export class DeviceGraphQLService {
         filter: filters
       }
     }).pipe(
-      map(result => result.data.protocolFieldsStructs)
+      map((result: any) => result.data?.protocolFieldsStructs)
     );
   }
 
   // Get devices by profile ID with count
   getDevicesByProfile(profileId: string, pageSize: number = 10, page: number = 0): Observable<DevicesConnection> {
-    return this.apollo.query<GraphQLResponse<{ protocolFieldsStructs: DevicesConnection }>>({
+    return this.apollo.query({
       query: gql`
         query DevicesByProfile($profileId: String!, $first: Int!, $offset: Int!) {
           protocolFieldsStructs(
@@ -145,13 +375,13 @@ export class DeviceGraphQLService {
       `,
       variables: { profileId, first: pageSize, offset: page * pageSize }
     }).pipe(
-      map(result => result.data.protocolFieldsStructs)
+      map((result: any) => result.data?.protocolFieldsStructs)
     );
   }
 
-  // Get device types with counts
-  getDeviceTypes(): Observable<DeviceTypeCount[]> {
-    return this.apollo.query<GraphQLResponse<{ protocolFieldsStructs: { groupBy: Array<{ value: string; count: number }> } }>>({
+  // Get device types with counts - enhanced to match ThingsBoard API
+  getDeviceTypes(): Observable<string[]> {
+    return this.apollo.query({
       query: gql`
         query DeviceTypes {
           protocolFieldsStructs(
@@ -165,11 +395,8 @@ export class DeviceGraphQLService {
         }
       `
     }).pipe(
-      map(result => 
-        result.data.protocolFieldsStructs.groupBy.map(group => ({
-          type: group.value,
-          count: group.count
-        }))
+      map((result: any) => 
+        result.data?.protocolFieldsStructs?.groupBy?.map((group: any) => group.value).sort() || []
       )
     );
   }
@@ -213,7 +440,7 @@ export class DeviceGraphQLService {
       });
     }
 
-    return this.apollo.query<GraphQLResponse<{ protocolFieldsStructs: DevicesConnection }>>({
+    return this.apollo.query({
       query: gql`
         query SearchDevices($filter: ProtocolFieldsStructFilter!) {
           protocolFieldsStructs(filter: $filter) {
@@ -237,18 +464,13 @@ export class DeviceGraphQLService {
         filter: { and: filters }
       }
     }).pipe(
-      map(result => result.data.protocolFieldsStructs)
+      map((result: any) => result.data?.protocolFieldsStructs)
     );
   }
 
   // Get device statistics
   getDeviceStatistics(): Observable<DeviceStatistics> {
-    return this.apollo.query<GraphQLResponse<{
-      totalDevices: { totalCount: number };
-      byType: { groupBy: Array<{ value: string; count: number }> };
-      byProfile: { groupBy: Array<{ value: string; count: number }> };
-      recentDevices: { edges: Array<{ node: { protocolId: string; created: string } }> };
-    }>>({
+    return this.apollo.query({
       query: gql`
         query DeviceStatistics {
           totalDevices: protocolStates {
@@ -284,11 +506,11 @@ export class DeviceGraphQLService {
         }
       `
     }).pipe(
-      map(result => ({
-        total: result.data.totalDevices.totalCount,
-        byType: result.data.byType.groupBy,
-        byProfile: result.data.byProfile.groupBy,
-        recent: result.data.recentDevices.edges
+      map((result: any) => ({
+        total: result.data?.totalDevices?.totalCount || 0,
+        byType: result.data?.byType?.groupBy || [],
+        byProfile: result.data?.byProfile?.groupBy || [],
+        recent: result.data?.recentDevices?.edges || []
       }))
     );
   }
@@ -304,5 +526,81 @@ export class DeviceGraphQLService {
       device.protocolId = node.protocolId;
       return device;
     }, {});
+  }
+
+  private transformDeviceInfoResult(result: any): DeviceInfo | null {
+    const device = this.transformDeviceResult(result);
+    if (!device) return null;
+
+    return {
+      id: device.id,
+      name: device.name,
+      type: device.type,
+      label: device.label,
+      deviceProfileId: device.deviceProfileId,
+      customerId: device.customerId,
+      active: true, // Would need additional logic to determine this
+      lastActivityTime: device.createdTime
+    };
+  }
+
+  private transformDeviceInfosFromConnection(connection: DevicesConnection): DeviceInfo[] {
+    if (!connection || !connection.edges) return [];
+    
+    const deviceGroups = new Map<string, any>();
+    
+    // Group edges by protocolId to reconstruct complete device objects
+    connection.edges.forEach(edge => {
+      const protocolId = edge.node.protocolId;
+      if (!deviceGroups.has(protocolId)) {
+        deviceGroups.set(protocolId, {});
+      }
+      const device = deviceGroups.get(protocolId);
+      device[edge.node.field] = edge.node.value;
+      device.protocolId = protocolId;
+    });
+
+    // Convert to DeviceInfo objects
+    return Array.from(deviceGroups.values()).map(device => ({
+      id: device.id,
+      name: device.name,
+      type: device.type,
+      label: device.label,
+      deviceProfileId: device.deviceProfileId,
+      customerId: device.customerId,
+      active: true,
+      lastActivityTime: device.createdTime
+    }));
+  }
+
+  private transformDeviceCredentialsResult(result: any, deviceId: string): DeviceCredentials | null {
+    const device = this.transformDeviceResult(result);
+    if (!device || !device.credentials) return null;
+
+    return {
+      id: `${deviceId}_credentials`,
+      deviceId: deviceId,
+      credentialsType: 'ACCESS_TOKEN', // Default assumption
+      credentialsId: device.credentials,
+      credentialsValue: device.credentials
+    };
+  }
+
+  private transformMultipleDevicesResult(result: any): any[] {
+    const edges = result.data?.protocolFieldsStructs?.edges || [];
+    const deviceGroups = new Map<string, any>();
+    
+    // Group edges by protocolId to reconstruct complete device objects
+    edges.forEach((edge: any) => {
+      const protocolId = edge.node.protocolId;
+      if (!deviceGroups.has(protocolId)) {
+        deviceGroups.set(protocolId, {});
+      }
+      const device = deviceGroups.get(protocolId);
+      device[edge.node.field] = edge.node.value;
+      device.protocolId = protocolId;
+    });
+
+    return Array.from(deviceGroups.values());
   }
 } 

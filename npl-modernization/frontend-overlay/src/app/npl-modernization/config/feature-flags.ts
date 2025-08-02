@@ -10,10 +10,10 @@ export interface NplFeatureFlags {
 
 // Current configuration - can be easily toggled for testing
 export const NPL_FEATURE_FLAGS: NplFeatureFlags = {
-  enableInterceptor: false, // TEMPORARILY DISABLED for build testing
-  enableGraphQL: false,     // TEMPORARILY DISABLED for build testing
-  enableNplEngine: false,   // TEMPORARILY DISABLED for build testing
-  enableLogging: false      // TEMPORARILY DISABLED for build testing
+  enableInterceptor: true,  // ✅ ENABLED for NPL integration testing
+  enableGraphQL: true,      // ✅ ENABLED for GraphQL read operations
+  enableNplEngine: true,    // ✅ ENABLED for NPL write operations
+  enableLogging: true       // ✅ ENABLED for debugging
 };
 
 // Environment-based override capability
