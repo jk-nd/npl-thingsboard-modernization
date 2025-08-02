@@ -1,19 +1,3 @@
-#
-# Copyright © 2016-2025 The Thingsboard Authors
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-#
-
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
 import axios, { AxiosInstance } from 'axios';
 
@@ -36,6 +20,10 @@ interface Device {
   customerId?: string;
   tenantId?: string;
   createdTime?: number;
+  deviceProfileId?: {
+    id: string;
+    entityType: string;
+  };
 }
 
 interface DeviceCredentials {
@@ -53,10 +41,11 @@ class DeviceManagementIntegrationTest {
   private nplProxyClient: AxiosInstance;
   private nplEngineClient: AxiosInstance;
   private createdDevices: string[] = [];
+  private defaultDeviceProfile: any; // To store the default device profile
 
   constructor() {
     this.config = {
-      thingsBoardUrl: process.env.TB_URL || 'http://localhost:8082',
+      thingsBoardUrl: process.env.TB_URL || 'http://localhost:9090', // Use mytb-core for API calls
       nplProxyUrl: process.env.NPL_PROXY_URL || 'http://localhost:8081',
       nplEngineUrl: process.env.NPL_ENGINE_URL || 'http://localhost:12000',
       nplReadModelUrl: process.env.NPL_READ_MODEL_URL || 'http://localhost:5001',
@@ -100,6 +89,11 @@ class DeviceManagementIntegrationTest {
     this.nplEngineClient.defaults.headers.common['Authorization'] = authHeader;
 
     console.log('✅ Authentication successful');
+
+    // Get default device profile
+    const deviceProfileResponse = await this.thingsBoardClient.get('/api/deviceProfileInfos?page=0&pageSize=1');
+    this.defaultDeviceProfile = deviceProfileResponse.data.data[0];
+    console.log(`🔌 Using device profile: ${this.defaultDeviceProfile.name}`);
   }
 
   async cleanup(): Promise<void> {
@@ -122,12 +116,17 @@ class DeviceManagementIntegrationTest {
 
   async testGetDeviceById(): Promise<void> {
     console.log('📖 Testing: getDeviceById via NPL GraphQL...');
-    
+
     // First create a device via ThingsBoard directly
+    const deviceName = `test-device-get-by-id-${Date.now()}`;
     const testDevice: Device = {
-      name: 'test-device-get-by-id',
+      name: deviceName,
       type: 'sensor',
-      label: 'Test device for getById'
+      label: 'Test device for getById',
+      deviceProfileId: {
+        id: this.defaultDeviceProfile.id,
+        entityType: 'DEVICE_PROFILE'
+      }
     };
 
     const createResponse = await this.thingsBoardClient.post('/api/device', testDevice);
@@ -136,27 +135,33 @@ class DeviceManagementIntegrationTest {
 
     // Test getting device via NPL proxy (should route to GraphQL)
     const nplResponse = await this.nplProxyClient.get(`/api/device/${createdDevice.id}`);
-    
+
     // Test getting device via direct ThingsBoard
     const tbResponse = await this.thingsBoardClient.get(`/api/device/${createdDevice.id}`);
 
     // Verify both responses contain the device
     expect(nplResponse.status).toBe(200);
     expect(tbResponse.status).toBe(200);
-    expect(nplResponse.data.name).toBe(testDevice.name);
-    expect(tbResponse.data.name).toBe(testDevice.name);
+    expect(nplResponse.data.name).toBe(deviceName);
+    expect(tbResponse.data.name).toBe(deviceName);
 
     console.log('✅ getDeviceById test passed');
   }
 
   async testGetDeviceInfoById(): Promise<void> {
     console.log('📖 Testing: getDeviceInfoById via NPL GraphQL...');
-    
+
     // Create a test device
+    const deviceName = `test-device-info-${Date.now()}`;
+    const deviceType = 'gateway';
     const testDevice: Device = {
-      name: 'test-device-info',
-      type: 'gateway',
-      label: 'Test device for deviceInfo'
+      name: deviceName,
+      type: deviceType,
+      label: 'Test device for deviceInfo',
+      deviceProfileId: {
+        id: this.defaultDeviceProfile.id,
+        entityType: 'DEVICE_PROFILE'
+      }
     };
 
     const createResponse = await this.thingsBoardClient.post('/api/device', testDevice);
@@ -165,34 +170,41 @@ class DeviceManagementIntegrationTest {
 
     // Test getting device info via NPL proxy
     const nplResponse = await this.nplProxyClient.get(`/api/device/info/${createdDevice.id}`);
-    
+
     // Test getting device info via direct ThingsBoard
     const tbResponse = await this.thingsBoardClient.get(`/api/device/info/${createdDevice.id}`);
 
     // Verify responses
     expect(nplResponse.status).toBe(200);
     expect(tbResponse.status).toBe(200);
-    expect(nplResponse.data.name).toBe(testDevice.name);
-    expect(nplResponse.data.type).toBe(testDevice.type);
+    expect(nplResponse.data.name).toBe(deviceName);
+    expect(nplResponse.data.type).toBe(deviceType);
 
     console.log('✅ getDeviceInfoById test passed');
   }
 
   async testGetTenantDevices(): Promise<void> {
     console.log('📖 Testing: getTenantDevices via NPL GraphQL...');
-    
+
     // Create multiple test devices
-    const deviceNames = ['tenant-device-1', 'tenant-device-2', 'tenant-device-3'];
-    
+    const deviceNames = [`tenant-device-1-${Date.now()}`, `tenant-device-2-${Date.now()}`, `tenant-device-3-${Date.now()}`];
+
     for (const name of deviceNames) {
-      const device: Device = { name, type: 'sensor' };
+      const device: Device = {
+        name,
+        type: 'sensor',
+        deviceProfileId: {
+          id: this.defaultDeviceProfile.id,
+          entityType: 'DEVICE_PROFILE'
+        }
+      };
       const response = await this.thingsBoardClient.post('/api/device', device);
       this.createdDevices.push(response.data.id);
     }
 
     // Test getting tenant devices via NPL proxy
     const nplResponse = await this.nplProxyClient.get('/api/tenant/devices?pageSize=10');
-    
+
     // Test getting tenant devices via direct ThingsBoard
     const tbResponse = await this.thingsBoardClient.get('/api/tenant/devices?pageSize=10');
 
@@ -208,19 +220,26 @@ class DeviceManagementIntegrationTest {
 
   async testGetDeviceTypes(): Promise<void> {
     console.log('📖 Testing: getDeviceTypes via NPL GraphQL...');
-    
+
     // Create devices with different types
     const deviceTypes = ['sensor', 'gateway', 'actuator'];
-    
+
     for (const type of deviceTypes) {
-      const device: Device = { name: `device-${type}`, type };
+      const device: Device = {
+        name: `device-${type}-${Date.now()}`,
+        type,
+        deviceProfileId: {
+          id: this.defaultDeviceProfile.id,
+          entityType: 'DEVICE_PROFILE'
+        }
+      };
       const response = await this.thingsBoardClient.post('/api/device', device);
       this.createdDevices.push(response.data.id);
     }
 
     // Test getting device types via NPL proxy
     const nplResponse = await this.nplProxyClient.get('/api/device/types');
-    
+
     // Test getting device types via direct ThingsBoard
     const tbResponse = await this.thingsBoardClient.get('/api/device/types');
 
@@ -229,7 +248,7 @@ class DeviceManagementIntegrationTest {
     expect(tbResponse.status).toBe(200);
     expect(Array.isArray(nplResponse.data)).toBe(true);
     expect(Array.isArray(tbResponse.data)).toBe(true);
-    
+
     // Check that our created types are included
     for (const type of deviceTypes) {
       expect(nplResponse.data).toContain(type);
@@ -241,30 +260,35 @@ class DeviceManagementIntegrationTest {
 
   async testSearchDevices(): Promise<void> {
     console.log('📖 Testing: searchDevices via NPL GraphQL...');
-    
+
     // Create a device with a unique name for searching
+    const deviceName = `unique-search-device-${Date.now()}`;
     const searchDevice: Device = {
-      name: 'unique-search-device-12345',
+      name: deviceName,
       type: 'sensor',
-      label: 'Device for search testing'
+      label: 'Device for search testing',
+      deviceProfileId: {
+        id: this.defaultDeviceProfile.id,
+        entityType: 'DEVICE_PROFILE'
+      }
     };
 
     const createResponse = await this.thingsBoardClient.post('/api/device', searchDevice);
     this.createdDevices.push(createResponse.data.id);
 
     // Test searching via NPL proxy
-    const nplResponse = await this.nplProxyClient.get('/api/devices?deviceName=unique-search');
-    
+    const nplResponse = await this.nplProxyClient.get(`/api/devices?deviceName=unique-search-device`);
+
     // Test searching via direct ThingsBoard
-    const tbResponse = await this.thingsBoardClient.get('/api/devices?deviceName=unique-search');
+    const tbResponse = await this.thingsBoardClient.get(`/api/devices?deviceName=unique-search-device`);
 
     // Verify responses
     expect(nplResponse.status).toBe(200);
     expect(tbResponse.status).toBe(200);
     expect(nplResponse.data.data).toBeDefined();
     expect(nplResponse.data.data.length).toBeGreaterThanOrEqual(1);
-    
-    const foundDevice = nplResponse.data.data.find((d: Device) => d.name === searchDevice.name);
+
+    const foundDevice = nplResponse.data.data.find((d: Device) => d.name === deviceName);
     expect(foundDevice).toBeDefined();
 
     console.log('✅ searchDevices test passed');
@@ -274,38 +298,48 @@ class DeviceManagementIntegrationTest {
 
   async testCreateDevice(): Promise<void> {
     console.log('✏️ Testing: createDevice via NPL Engine...');
-    
+
+    const deviceName = `npl-created-device-${Date.now()}`;
     const testDevice: Device = {
-      name: 'npl-created-device',
+      name: deviceName,
       type: 'sensor',
-      label: 'Device created via NPL Engine'
+      label: 'Device created via NPL Engine',
+      deviceProfileId: {
+        id: this.defaultDeviceProfile.id,
+        entityType: 'DEVICE_PROFILE'
+      }
     };
 
     // Create device via NPL proxy (should route to NPL Engine)
     const nplResponse = await this.nplProxyClient.post('/api/device', testDevice);
-    
+
     expect(nplResponse.status).toBe(200);
-    expect(nplResponse.data.name).toBe(testDevice.name);
+    expect(nplResponse.data.name).toBe(deviceName);
     expect(nplResponse.data.id).toBeDefined();
-    
+
     this.createdDevices.push(nplResponse.data.id);
 
     // Verify device exists in ThingsBoard
     const verifyResponse = await this.thingsBoardClient.get(`/api/device/${nplResponse.data.id}`);
     expect(verifyResponse.status).toBe(200);
-    expect(verifyResponse.data.name).toBe(testDevice.name);
+    expect(verifyResponse.data.name).toBe(deviceName);
 
     console.log('✅ createDevice test passed');
   }
 
   async testUpdateDevice(): Promise<void> {
     console.log('✏️ Testing: updateDevice via NPL Engine...');
-    
+
     // First create a device
+    const deviceName = `device-to-update-${Date.now()}`;
     const originalDevice: Device = {
-      name: 'device-to-update',
+      name: deviceName,
       type: 'sensor',
-      label: 'Original label'
+      label: 'Original label',
+      deviceProfileId: {
+        id: this.defaultDeviceProfile.id,
+        entityType: 'DEVICE_PROFILE'
+      }
     };
 
     const createResponse = await this.thingsBoardClient.post('/api/device', originalDevice);
@@ -318,7 +352,7 @@ class DeviceManagementIntegrationTest {
     };
 
     const nplResponse = await this.nplProxyClient.post('/api/device', updatedDevice);
-    
+
     expect(nplResponse.status).toBe(200);
     expect(nplResponse.data.label).toBe('Updated via NPL Engine');
 
@@ -331,11 +365,16 @@ class DeviceManagementIntegrationTest {
 
   async testDeleteDevice(): Promise<void> {
     console.log('✏️ Testing: deleteDevice via NPL Engine...');
-    
+
     // Create a device to delete
+    const deviceName = `device-to-delete-${Date.now()}`;
     const deviceToDelete: Device = {
-      name: 'device-to-delete',
-      type: 'sensor'
+      name: deviceName,
+      type: 'sensor',
+      deviceProfileId: {
+        id: this.defaultDeviceProfile.id,
+        entityType: 'DEVICE_PROFILE'
+      }
     };
 
     const createResponse = await this.thingsBoardClient.post('/api/device', deviceToDelete);
@@ -343,7 +382,7 @@ class DeviceManagementIntegrationTest {
 
     // Delete via NPL proxy (should route to NPL Engine)
     const nplResponse = await this.nplProxyClient.delete(`/api/device/${deviceId}`);
-    
+
     expect(nplResponse.status).toBe(200);
 
     // Verify device no longer exists in ThingsBoard
@@ -495,6 +534,9 @@ describe('NPL DeviceManagement Integration', () => {
   let testSuite: DeviceManagementIntegrationTest;
 
   beforeAll(async () => {
+    // Add a delay to allow mytb-core to start up
+    await new Promise(resolve => setTimeout(resolve, 10000));
+
     testSuite = new DeviceManagementIntegrationTest();
     await testSuite.setup();
   }, 30000);

@@ -146,6 +146,11 @@ services:
         condition: service_healthy
     networks:
       - npl-network
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 5 bash -c 'cat < /dev/null > /dev/tcp/127.0.0.1/8080'"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
 
   mytb-ui:
     image: "thingsboard/tb-web-ui:latest"
@@ -160,15 +165,21 @@ services:
 
   npl-proxy:
     image: nginx:alpine
+    container_name: thingsboard-npl-proxy
+    restart: always
     ports:
       - "8081:80"
     volumes:
       - ./nginx-proxy.conf:/etc/nginx/conf.d/default.conf
-      - ./npl-modernization/overlay:/assets/overlay
-    depends_on:
-      - mytb-ui
+      - ./npl-modernization/frontend-overlay/dist/npl-modernization:/assets/overlay
     networks:
+      - default
       - npl-network
+    depends_on:
+      mytb-core:
+        condition: service_healthy
+      mytb-ui:
+        condition: service_started
 
 volumes:
   postgres_data:

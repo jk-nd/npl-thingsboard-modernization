@@ -24,7 +24,7 @@ echo "=============================================="
 cd "$(dirname "$0")"
 
 # Set default environment variables if not provided
-export TB_URL="${TB_URL:-http://localhost:8082}"
+export TB_URL="${TB_URL:-http://localhost:9090}"
 export NPL_PROXY_URL="${NPL_PROXY_URL:-http://localhost:8081}"
 export NPL_ENGINE_URL="${NPL_ENGINE_URL:-http://localhost:12000}"
 export NPL_READ_MODEL_URL="${NPL_READ_MODEL_URL:-http://localhost:5001}"
