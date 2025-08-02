@@ -48,13 +48,36 @@ check_service() {
     local url=$1
     local name=$2
     
-    if curl -f -s "$url" > /dev/null 2>&1 || curl -f -s "$url/api/health" > /dev/null 2>&1; then
-        echo "  ✅ $name is running"
-        return 0
-    else
-        echo "  ❌ $name is not responding at $url"
-        return 1
-    fi
+    # Special handling for different service types
+    case "$name" in
+        "NPL Engine")
+            if curl -f -s "$url/actuator/health" > /dev/null 2>&1; then
+                echo "  ✅ $name is running"
+                return 0
+            else
+                echo "  ❌ $name is not responding at $url/actuator/health"
+                return 1
+            fi
+            ;;
+        "NPL Read Model")
+            if curl -f -s "$url/graphql" > /dev/null 2>&1 || curl -s "$url/graphql" | grep -q "No authorization token was found"; then
+                echo "  ✅ $name is running"
+                return 0
+            else
+                echo "  ❌ $name is not responding at $url/graphql"
+                return 1
+            fi
+            ;;
+        *)
+            if curl -f -s "$url" > /dev/null 2>&1 || curl -f -s "$url/api/health" > /dev/null 2>&1; then
+                echo "  ✅ $name is running"
+                return 0
+            else
+                echo "  ❌ $name is not responding at $url"
+                return 1
+            fi
+            ;;
+    esac
 }
 
 # Check all services

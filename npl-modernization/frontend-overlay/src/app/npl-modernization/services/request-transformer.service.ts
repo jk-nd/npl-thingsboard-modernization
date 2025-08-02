@@ -30,27 +30,27 @@ export class RequestTransformerService {
 
     // List of device read endpoints that should be routed to GraphQL
     const readEndpoints = [
-      // Basic device queries
-      /^\/api\/device\/([^\/]+)$/,                    // GET /api/device/{id}
-      /^\/api\/device\/info\/([^\/]+)$/,              // GET /api/device/info/{id}
-      
-      // Tenant device queries
+      // Tenant device queries - these should come FIRST to avoid conflicts
       /^\/api\/tenant\/devices$/,                     // GET /api/tenant/devices
       /^\/api\/tenant\/deviceInfos$/,                 // GET /api/tenant/deviceInfos
       
-      // Customer device queries
+      // Customer device queries - these should come BEFORE device patterns
       /^\/api\/customer\/([^\/]+)\/devices$/,         // GET /api/customer/{id}/devices
       /^\/api\/customer\/([^\/]+)\/deviceInfos$/,     // GET /api/customer/{id}/deviceInfos
       
-      // Device credentials
-      /^\/api\/device\/([^\/]+)\/credentials$/,       // GET /api/device/{id}/credentials
-      
-      // Device queries and searches
+      // Device queries and searches - these should come BEFORE specific device patterns
       /^\/api\/devices$/,                             // GET /api/devices (with params)
       /^\/api\/device\/types$/,                       // GET /api/device/types
       
       // Device counts
       /^\/api\/devices\/count\/([^\/]+)\/([^\/]+)$/,  // GET /api/devices/count/{type}/{profileId}
+      
+      // Basic device queries - these should come LAST to avoid conflicts
+      /^\/api\/device\/([^\/]+)$/,                    // GET /api/device/{id}
+      /^\/api\/device\/info\/([^\/]+)$/,              // GET /api/device/info/{id}
+      
+      // Device credentials
+      /^\/api\/device\/([^\/]+)\/credentials$/,       // GET /api/device/{id}/credentials
     ];
 
     return readEndpoints.some(pattern => pattern.test(url));

@@ -18,7 +18,7 @@ export default async function globalSetup() {
   console.log('🏗️ Global setup: Preparing NPL DeviceManagement test environment...');
   
   // Set default environment variables for tests
-  process.env.TB_URL = process.env.TB_URL || 'http://localhost:8082';
+  process.env.TB_URL = process.env.TB_URL || 'http://localhost:9090';
   process.env.NPL_PROXY_URL = process.env.NPL_PROXY_URL || 'http://localhost:8081';
   process.env.NPL_ENGINE_URL = process.env.NPL_ENGINE_URL || 'http://localhost:12000';
   process.env.NPL_READ_MODEL_URL = process.env.NPL_READ_MODEL_URL || 'http://localhost:5001';
