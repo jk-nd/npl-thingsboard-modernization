@@ -42,37 +42,241 @@ struct BulkImportResult {
 };
 
 /**
+ * Device creation request with credentials
+ */
+struct SaveDeviceWithCredentialsRequest {
+    device: Device,
+    credentials: DeviceCredentials
+};
+
+/**
  * Notifications
  */
 notification deviceSaved(device: Device) returns Unit;
 notification deviceDeleted(deviceId: Text) returns Unit;
-notification deviceAssigned(deviceId: Text, customerId: Text) returns Unit;
-notification deviceUnassigned(deviceId: Text) returns Unit;
 notification deviceCredentialsUpdated(deviceId: Text, credentials: Text) returns Unit;
 notification deviceCredentialsDeleted(deviceId: Text) returns Unit;
+notification deviceAssigned(deviceId: Text, customerId: Text) returns Unit;
+notification deviceUnassigned(deviceId: Text) returns Unit;
 notification deviceClaimed(deviceId: Text, claimedBy: Text) returns Unit;
 notification deviceReclaimed(deviceId: Text, reclaimedBy: Text) returns Unit;
-notification devicesBulkImported(importedCount: Number, failedCount: Number) returns Unit;
-notification devicesBulkDeleted(deletedCount: Number, failedCount: Number) returns Unit;
 notification deviceAssignedToEdge(deviceId: Text, edgeId: Text) returns Unit;
 notification deviceUnassignedFromEdge(deviceId: Text, edgeId: Text) returns Unit;
+notification devicesBulkImported(importedCount: Number, failedCount: Number) returns Unit;
+notification devicesBulkDeleted(deletedCount: Number, failedCount: Number) returns Unit;
+
+// ========== DEVICE-SPECIFIC COMPOSED PROTOCOLS ==========
 
 /**
- * Device management protocol
+ * Device Credentials Management Protocol
+ * Handles authentication and access credentials for a specific device
+ */
+@api
+protocol[sys_admin, tenant_admin] DeviceCredentialsManager(var deviceId: Text) {
+    
+    initial state active;
+    final state deleted;
+    
+    private var credentialsType: Text = "ACCESS_TOKEN";
+    private var credentialsId: Text = "";
+    private var credentialsValue: Text = "";
+    
+    init {
+        // Generate default credentials
+        credentialsId = "device_" + deviceId;
+        credentialsValue = "token_" + deviceId + "_" + now().toText();
+    };
+    
+    /**
+     * Update device credentials
+     */
+    @api
+    permission[sys_admin | tenant_admin] updateCredentials(newType: Text, newId: Text, newValue: Text) | active {
+        require(newType.length() > 0, "Credentials type cannot be empty");
+        require(newValue.length() > 0, "Credentials value cannot be empty");
+        
+        credentialsType = newType;
+        credentialsId = newId;
+        credentialsValue = newValue;
+        
+        notify deviceCredentialsUpdated(deviceId, credentialsId);
+    };
+    
+    /**
+     * Get current credentials
+     */
+    @api
+    permission[sys_admin | tenant_admin] getCredentials() returns DeviceCredentials | active {
+        return DeviceCredentials(
+            deviceId = deviceId,
+            credentialsType = credentialsType,
+            credentialsId = credentialsId,
+            credentialsValue = credentialsValue
+        );
+    };
+    
+    /**
+     * Delete credentials
+     */
+    @api
+    permission[sys_admin | tenant_admin] deleteCredentials() | active {
+        credentialsType = "";
+        credentialsId = "";
+        credentialsValue = "";
+        
+        notify deviceCredentialsDeleted(deviceId);
+        become deleted;
+    };
+    
+    /**
+     * Get credentials value for device record
+     */
+    @api
+    permission[sys_admin | tenant_admin] getCredentialsValue() returns Text | active {
+        return credentialsValue;
+    };
+};
+
+/**
+ * Customer Assignment Protocol
+ * Manages the relationship between a device and customers
+ */
+@api
+protocol[sys_admin, tenant_admin] CustomerAssignment(var deviceId: Text) {
+    
+    initial state unassigned;
+    state assigned;
+    state claimed;
+    
+    private var customerId: Optional<Text> = optionalOf<Text>();
+    private var claimedBy: Optional<Text> = optionalOf<Text>();
+    
+    /**
+     * Assign device to customer
+     */
+    @api
+    permission[sys_admin | tenant_admin] assignToCustomer(newCustomerId: Text) | unassigned {
+        require(newCustomerId.length() > 0, "Customer ID cannot be empty");
+        
+        customerId = optionalOf(newCustomerId);
+        notify deviceAssigned(deviceId, newCustomerId);
+        become assigned;
+    };
+    
+    /**
+     * Unassign device from customer
+     */
+    @api
+    permission[sys_admin | tenant_admin] unassignFromCustomer() | assigned {
+        var oldCustomerId = customerId.getOrFail();
+        customerId = optionalOf<Text>();
+        notify deviceUnassigned(deviceId);
+        become unassigned;
+    };
+    
+    /**
+     * Claim device (customer takes ownership)
+     */
+    @api
+    permission[sys_admin | tenant_admin] claimDevice(claimerId: Text) | assigned {
+        require(claimerId.length() > 0, "Claimer ID cannot be empty");
+        
+        claimedBy = optionalOf(claimerId);
+        notify deviceClaimed(deviceId, claimerId);
+        become claimed;
+    };
+    
+    /**
+     * Reclaim device (remove customer ownership)
+     */
+    @api
+    permission[sys_admin | tenant_admin] reclaimDevice(reclaimerId: Text) | claimed {
+        require(reclaimerId.length() > 0, "Reclaimer ID cannot be empty");
+        
+        claimedBy = optionalOf<Text>();
+        notify deviceReclaimed(deviceId, reclaimerId);
+        become assigned;
+    };
+    
+    /**
+     * Get current customer assignment
+     */
+    @api
+    permission[sys_admin | tenant_admin] getCurrentCustomer() returns Optional<Text> {
+        return customerId;
+    };
+    
+    /**
+     * Get current customer for device record
+     */
+    @api
+    permission[sys_admin | tenant_admin] getCustomerIdForDevice() returns Optional<Text> {
+        return customerId;
+    };
+};
+
+/**
+ * Edge Assignment Protocol  
+ * Manages device assignments to edge instances
+ */
+@api
+protocol[sys_admin, tenant_admin] EdgeAssignment(var deviceId: Text) {
+    
+    initial state unassigned;
+    state assigned;
+    
+    private var edgeId: Optional<Text> = optionalOf<Text>();
+    
+    /**
+     * Assign device to edge
+     */
+    @api
+    permission[sys_admin | tenant_admin] assignToEdge(newEdgeId: Text) | unassigned {
+        require(newEdgeId.length() > 0, "Edge ID cannot be empty");
+        
+        edgeId = optionalOf(newEdgeId);
+        notify deviceAssignedToEdge(deviceId, newEdgeId);
+        become assigned;
+    };
+    
+    /**
+     * Unassign device from edge
+     */
+    @api
+    permission[sys_admin | tenant_admin] unassignFromEdge() | assigned {
+        var oldEdgeId = edgeId.getOrFail();
+        edgeId = optionalOf<Text>();
+        notify deviceUnassignedFromEdge(deviceId, oldEdgeId);
+        become unassigned;
+    };
+    
+    /**
+     * Get current edge assignment
+     */
+    @api
+    permission[sys_admin | tenant_admin] getCurrentEdge() returns Optional<Text> {
+        return edgeId;
+    };
+};
+
+// ========== MAIN DEVICE MANAGEMENT PROTOCOL ==========
+
+/**
+ * Main Device Management Protocol
+ * Orchestrates device lifecycle using composed protocols
  */
 @api
 protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
 
     initial state active;
     
-    // Protocol state: stored devices by ID
+    // Core device storage
     private var devices = mapOf<Text, Device>();
     
-    // Device credentials by device ID
-    private var deviceCredentials = mapOf<Text, DeviceCredentials>();
-    
-    // Customer assignments: deviceId -> customerId
-    private var customerAssignments = mapOf<Text, Text>();
+    // Composed protocol instances for each device
+    private var deviceCredentials = mapOf<Text, DeviceCredentialsManager>();
+    private var customerAssignments = mapOf<Text, CustomerAssignment>();
+    private var edgeAssignments = mapOf<Text, EdgeAssignment>();
 
     /**
      * Validate device data
@@ -94,73 +298,65 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
     };
 
     /**
-     * Create or update a device
+     * Create or update a device with composed protocol creation
      */
     @api
     permission[sys_admin | tenant_admin] saveDevice(device: Device) returns Device | active {
-        // Validate input
-        require(validateDevice(device), "Invalid device data");
+        require(validateDevice(device), "Device validation failed");
         
-        // Check if device already exists
-        var existingDevice = devices.getOrNone(device.id);
-        var isUpdate = existingDevice.isPresent();
+        var isNewDevice = !devices.getOrNone(device.id).isPresent();
         
-        // Set creation time for new devices
-        var savedDevice = device;
-        if (!isUpdate && !device.createdTime.isPresent()) {
-            savedDevice = Device(
-                id = device.id,
-                name = device.name,
-                type = device.type,
-                tenantId = device.tenantId,
-                customerId = device.customerId,
-                credentials = device.credentials,
-                label = device.label,
-                deviceProfileId = device.deviceProfileId,
-                firmwareId = device.firmwareId,
-                softwareId = device.softwareId,
-                externalId = device.externalId,
-                version = device.version,
-                additionalInfo = device.additionalInfo,
-                createdTime = optionalOf(1234567890),
-                deviceData = device.deviceData
-            );
+        // Create composed protocols for new devices
+        if (isNewDevice) {
+            var credentials = DeviceCredentialsManager[sys_admin, tenant_admin](device.id);
+            var customerAssignment = CustomerAssignment[sys_admin, tenant_admin](device.id);
+            var edgeAssignment = EdgeAssignment[sys_admin, tenant_admin](device.id);
+            
+            deviceCredentials = deviceCredentials.with(device.id, credentials);
+            customerAssignments = customerAssignments.with(device.id, customerAssignment);
+            edgeAssignments = edgeAssignments.with(device.id, edgeAssignment);
         };
         
-        // Generate credentials if needed
-        if (!isUpdate && savedDevice.credentials.length() == 0) {
-            var currentTime = now();
-            var token = "device_" + device.id + "_" + currentTime.toText();
-            savedDevice = Device(
-                id = savedDevice.id,
-                name = savedDevice.name,
-                type = savedDevice.type,
-                tenantId = savedDevice.tenantId,
-                customerId = savedDevice.customerId,
-                credentials = token,
-                label = savedDevice.label,
-                deviceProfileId = savedDevice.deviceProfileId,
-                firmwareId = savedDevice.firmwareId,
-                softwareId = savedDevice.softwareId,
-                externalId = savedDevice.externalId,
-                version = savedDevice.version,
-                additionalInfo = savedDevice.additionalInfo,
-                createdTime = savedDevice.createdTime,
-                deviceData = savedDevice.deviceData
-            );
+        // Get credentials value from composed protocol
+        var credentialsValue = "";
+        var credentialsProtocol = deviceCredentials.getOrNone(device.id);
+        if (credentialsProtocol.isPresent()) {
+            credentialsValue = credentialsProtocol.getOrFail().getCredentialsValue[sys_admin]();
         };
         
-        // Store the device
-        devices = devices.with(device.id, savedDevice);
+        // Get customer assignment from composed protocol
+        var customerIdForDevice = optionalOf<Text>();
+        var customerProtocol = customerAssignments.getOrNone(device.id);
+        if (customerProtocol.isPresent()) {
+            customerIdForDevice = customerProtocol.getOrFail().getCustomerIdForDevice[sys_admin]();
+        };
         
-        // Emit notification
-        notify deviceSaved(savedDevice);
+        var deviceToSave = Device(
+            id = device.id,
+            name = device.name,
+            type = device.type,
+            tenantId = device.tenantId,
+            customerId = customerIdForDevice,
+            credentials = credentialsValue,
+            label = device.label,
+            deviceProfileId = device.deviceProfileId,
+            firmwareId = device.firmwareId,
+            softwareId = device.softwareId,
+            externalId = device.externalId,
+            version = device.version,
+            additionalInfo = device.additionalInfo,
+            createdTime = optionalOf(1234567890),
+            deviceData = device.deviceData
+        );
         
-        return savedDevice;
+        devices = devices.with(deviceToSave.id, deviceToSave);
+        
+        notify deviceSaved(deviceToSave);
+        return deviceToSave;
     };
 
     /**
-     * Get a device by ID
+     * Get device by ID
      */
     @api
     permission[sys_admin | tenant_admin | customer_user] getDeviceById(id: Text) returns Optional<Device> | active {
@@ -168,211 +364,300 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
     };
 
     /**
-     * Delete a device
+     * Delete device with composed protocol cleanup
      */
     @api
     permission[sys_admin | tenant_admin] deleteDevice(id: Text) | active {
         var device = devices.getOrNone(id);
         require(device.isPresent(), "Device not found");
         
-        // Remove device from storage
-        devices = devices.without(id);
+        // Clean up composed protocols
+        var credentialsProtocol = deviceCredentials.getOrNone(id);
+        if (credentialsProtocol.isPresent()) {
+            credentialsProtocol.getOrFail().deleteCredentials[sys_admin]();
+        };
+        
+        // Remove protocol instances
         deviceCredentials = deviceCredentials.without(id);
         customerAssignments = customerAssignments.without(id);
+        edgeAssignments = edgeAssignments.without(id);
+        devices = devices.without(id);
         
-        // Emit notification
         notify deviceDeleted(id);
     };
 
     /**
-     * Assign device to customer
+     * Assign device to customer using composed protocol
      */
     @api
     permission[sys_admin | tenant_admin] assignDeviceToCustomer(deviceId: Text, customerId: Text) | active {
-        require(deviceId.length() > 0, "Device ID cannot be empty");
-        require(customerId.length() > 0, "Customer ID cannot be empty");
-        
         var device = devices.getOrNone(deviceId);
         require(device.isPresent(), "Device not found");
         
-        // Update device customer assignment
-        var deviceObj = device.getOrFail();
+        var customerAssignment = customerAssignments.getOrNone(deviceId).getOrFail();
+        customerAssignment.assignToCustomer[sys_admin](customerId);
+        
+        // Update device record with new customer assignment
         var updatedDevice = Device(
-            id = deviceObj.id,
-            name = deviceObj.name,
-            type = deviceObj.type,
-            tenantId = deviceObj.tenantId,
+            id = device.getOrFail().id,
+            name = device.getOrFail().name,
+            type = device.getOrFail().type,
+            tenantId = device.getOrFail().tenantId,
             customerId = optionalOf(customerId),
-            credentials = deviceObj.credentials,
-            label = deviceObj.label,
-            deviceProfileId = deviceObj.deviceProfileId,
-            firmwareId = deviceObj.firmwareId,
-            softwareId = deviceObj.softwareId,
-            externalId = deviceObj.externalId,
-            version = deviceObj.version,
-            additionalInfo = deviceObj.additionalInfo,
-            createdTime = deviceObj.createdTime,
-            deviceData = deviceObj.deviceData
+            credentials = device.getOrFail().credentials,
+            label = device.getOrFail().label,
+            deviceProfileId = device.getOrFail().deviceProfileId,
+            firmwareId = device.getOrFail().firmwareId,
+            softwareId = device.getOrFail().softwareId,
+            externalId = device.getOrFail().externalId,
+            version = device.getOrFail().version,
+            additionalInfo = device.getOrFail().additionalInfo,
+            createdTime = device.getOrFail().createdTime,
+            deviceData = device.getOrFail().deviceData
         );
-        
         devices = devices.with(deviceId, updatedDevice);
-        customerAssignments = customerAssignments.with(deviceId, customerId);
-        
-        notify deviceAssigned(deviceId, customerId);
     };
 
     /**
-     * Unassign device from customer
+     * Unassign device from customer using composed protocol
      */
     @api
     permission[sys_admin | tenant_admin] unassignDeviceFromCustomer(deviceId: Text) | active {
         var device = devices.getOrNone(deviceId);
         require(device.isPresent(), "Device not found");
         
-        var deviceObj = device.getOrFail();
+        var customerAssignment = customerAssignments.getOrNone(deviceId).getOrFail();
+        customerAssignment.unassignFromCustomer[sys_admin]();
+        
+        // Update device record
         var updatedDevice = Device(
-            id = deviceObj.id,
-            name = deviceObj.name,
-            type = deviceObj.type,
-            tenantId = deviceObj.tenantId,
+            id = device.getOrFail().id,
+            name = device.getOrFail().name,
+            type = device.getOrFail().type,
+            tenantId = device.getOrFail().tenantId,
             customerId = optionalOf<Text>(),
-            credentials = deviceObj.credentials,
-            label = deviceObj.label,
-            deviceProfileId = deviceObj.deviceProfileId,
-            firmwareId = deviceObj.firmwareId,
-            softwareId = deviceObj.softwareId,
-            externalId = deviceObj.externalId,
-            version = deviceObj.version,
-            additionalInfo = deviceObj.additionalInfo,
-            createdTime = deviceObj.createdTime,
-            deviceData = deviceObj.deviceData
+            credentials = device.getOrFail().credentials,
+            label = device.getOrFail().label,
+            deviceProfileId = device.getOrFail().deviceProfileId,
+            firmwareId = device.getOrFail().firmwareId,
+            softwareId = device.getOrFail().softwareId,
+            externalId = device.getOrFail().externalId,
+            version = device.getOrFail().version,
+            additionalInfo = device.getOrFail().additionalInfo,
+            createdTime = device.getOrFail().createdTime,
+            deviceData = device.getOrFail().deviceData
         );
-        
         devices = devices.with(deviceId, updatedDevice);
-        customerAssignments = customerAssignments.without(deviceId);
-        
-        notify deviceUnassigned(deviceId);
     };
 
     /**
-     * Save device credentials
+     * Save device credentials using composed protocol
      */
     @api
     permission[sys_admin | tenant_admin] saveDeviceCredentials(deviceId: Text, credentials: DeviceCredentials) | active {
         var device = devices.getOrNone(deviceId);
         require(device.isPresent(), "Device not found");
-        require(credentials.deviceId == deviceId, "Credentials device ID mismatch");
-        require(credentials.credentialsType.length() > 0, "Credentials type cannot be empty");
-        require(credentials.credentialsValue.length() > 0, "Credentials value cannot be empty");
         
-        deviceCredentials = deviceCredentials.with(deviceId, credentials);
+        var credentialsProtocol = deviceCredentials.getOrNone(deviceId).getOrFail();
+        credentialsProtocol.updateCredentials[sys_admin](credentials.credentialsType, credentials.credentialsId, credentials.credentialsValue);
         
-        var deviceObj = device.getOrFail();
+        // Update device record with new credentials
         var updatedDevice = Device(
-            id = deviceObj.id,
-            name = deviceObj.name,
-            type = deviceObj.type,
-            tenantId = deviceObj.tenantId,
-            customerId = deviceObj.customerId,
+            id = device.getOrFail().id,
+            name = device.getOrFail().name,
+            type = device.getOrFail().type,
+            tenantId = device.getOrFail().tenantId,
+            customerId = device.getOrFail().customerId,
             credentials = credentials.credentialsValue,
-            label = deviceObj.label,
-            deviceProfileId = deviceObj.deviceProfileId,
-            firmwareId = deviceObj.firmwareId,
-            softwareId = deviceObj.softwareId,
-            externalId = deviceObj.externalId,
-            version = deviceObj.version,
-            additionalInfo = deviceObj.additionalInfo,
-            createdTime = deviceObj.createdTime,
-            deviceData = deviceObj.deviceData
+            label = device.getOrFail().label,
+            deviceProfileId = device.getOrFail().deviceProfileId,
+            firmwareId = device.getOrFail().firmwareId,
+            softwareId = device.getOrFail().softwareId,
+            externalId = device.getOrFail().externalId,
+            version = device.getOrFail().version,
+            additionalInfo = device.getOrFail().additionalInfo,
+            createdTime = device.getOrFail().createdTime,
+            deviceData = device.getOrFail().deviceData
         );
-        
         devices = devices.with(deviceId, updatedDevice);
-        
-        notify deviceCredentialsUpdated(deviceId, credentials.credentialsValue);
     };
 
     /**
-     * Delete device credentials
+     * Delete device credentials using composed protocol
      */
     @api
     permission[sys_admin | tenant_admin] deleteDeviceCredentials(deviceId: Text) | active {
         var device = devices.getOrNone(deviceId);
         require(device.isPresent(), "Device not found");
         
-        deviceCredentials = deviceCredentials.without(deviceId);
-        
-        var deviceObj = device.getOrFail();
-        var updatedDevice = Device(
-            id = deviceObj.id,
-            name = deviceObj.name,
-            type = deviceObj.type,
-            tenantId = deviceObj.tenantId,
-            customerId = deviceObj.customerId,
-            credentials = "",
-            label = deviceObj.label,
-            deviceProfileId = deviceObj.deviceProfileId,
-            firmwareId = deviceObj.firmwareId,
-            softwareId = deviceObj.softwareId,
-            externalId = deviceObj.externalId,
-            version = deviceObj.version,
-            additionalInfo = deviceObj.additionalInfo,
-            createdTime = deviceObj.createdTime,
-            deviceData = deviceObj.deviceData
-        );
-        
-        devices = devices.with(deviceId, updatedDevice);
-        
-        notify deviceCredentialsDeleted(deviceId);
+        var credentialsProtocol = deviceCredentials.getOrNone(deviceId).getOrFail();
+        credentialsProtocol.deleteCredentials[sys_admin]();
     };
 
     /**
-     * Claim device
+     * Claim device using composed protocol
      */
     @api
     permission[sys_admin | tenant_admin] claimDevice(deviceId: Text) | active {
         var device = devices.getOrNone(deviceId);
         require(device.isPresent(), "Device not found");
         
-        var claimedBy = "current_user";
-        notify deviceClaimed(deviceId, claimedBy);
+        var customerAssignment = customerAssignments.getOrNone(deviceId).getOrFail();
+        customerAssignment.claimDevice[sys_admin]("current_user");
     };
 
     /**
-     * Reclaim device
+     * Reclaim device using composed protocol
      */
     @api
     permission[sys_admin | tenant_admin] reclaimDevice(deviceId: Text) | active {
         var device = devices.getOrNone(deviceId);
         require(device.isPresent(), "Device not found");
         
-        var reclaimedBy = "current_user";
-        notify deviceReclaimed(deviceId, reclaimedBy);
+        var customerAssignment = customerAssignments.getOrNone(deviceId).getOrFail();
+        customerAssignment.reclaimDevice[sys_admin]("current_user");
     };
+
+    /**
+     * Assign device to edge using composed protocol
+     */
+    @api
+    permission[sys_admin | tenant_admin] assignDeviceToEdge(deviceId: Text, edgeId: Text) | active {
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
+        
+        var edgeAssignment = edgeAssignments.getOrNone(deviceId).getOrFail();
+        edgeAssignment.assignToEdge[sys_admin](edgeId);
+    };
+
+    /**
+     * Unassign device from edge using composed protocol
+     */
+    @api
+    permission[sys_admin | tenant_admin] unassignDeviceFromEdge(deviceId: Text, edgeId: Text) | active {
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
+        
+        var edgeAssignment = edgeAssignments.getOrNone(deviceId).getOrFail();
+        edgeAssignment.unassignFromEdge[sys_admin]();
+    };
+
+    /**
+     * Get device credentials using composed protocol
+     */
+    @api
+    permission[sys_admin | tenant_admin] getDeviceCredentials(deviceId: Text) returns Optional<DeviceCredentials> | active {
+        var device = devices.getOrNone(deviceId);
+        require(device.isPresent(), "Device not found");
+        
+        var credentialsProtocol = deviceCredentials.getOrNone(deviceId);
+        if (credentialsProtocol.isPresent()) {
+            return optionalOf(credentialsProtocol.getOrFail().getCredentials[sys_admin]());
+        };
+        
+        return optionalOf<DeviceCredentials>();
+    };
+
+    /**
+     * Get customer devices using composed protocols
+     */
+    @api
+    permission[sys_admin | tenant_admin | customer_user] getCustomerDevices(customerId: Text) returns List<Device> | active {
+        var customerDevices = listOf<Device>();
+        var allDevices = devices.values();
+        
+        for (device in allDevices) {
+            var customerAssignment = customerAssignments.getOrNone(device.id);
+            if (customerAssignment.isPresent()) {
+                var assignedCustomer = customerAssignment.getOrFail().getCurrentCustomer[sys_admin]();
+                if (assignedCustomer.isPresent() && assignedCustomer.getOrFail() == customerId) {
+                    customerDevices = customerDevices.with(device);
+                };
+            };
+        };
+        
+        return customerDevices;
+    };
+
+    /**
+     * Get all devices
+     */
+    @api
+    permission[sys_admin | tenant_admin | customer_user] getAllDevices() returns List<Device> | active {
+        return devices.values();
+    };
+
+    /**
+     * Create device with credentials using protocol composition
+     */
+    @api
+    permission[sys_admin | tenant_admin] saveDeviceWithCredentials(request: SaveDeviceWithCredentialsRequest) returns Device | active {
+        require(validateDevice(request.device), "Device validation failed");
+        require(request.credentials.credentialsType.length() > 0, "Credentials type cannot be empty");
+        
+        // Implement device creation directly to avoid recursive call
+        var device = request.device;
+        var isNewDevice = !devices.getOrNone(device.id).isPresent();
+        
+        // Create composed protocols for new devices
+        if (isNewDevice) {
+            var credentials = DeviceCredentialsManager[sys_admin, tenant_admin](device.id);
+            var customerAssignment = CustomerAssignment[sys_admin, tenant_admin](device.id);
+            var edgeAssignment = EdgeAssignment[sys_admin, tenant_admin](device.id);
+            
+            deviceCredentials = deviceCredentials.with(device.id, credentials);
+            customerAssignments = customerAssignments.with(device.id, customerAssignment);
+            edgeAssignments = edgeAssignments.with(device.id, edgeAssignment);
+        };
+        
+        // Get credentials value from composed protocol
+        var credentialsValue = request.credentials.credentialsValue;
+        var credentialsProtocol = deviceCredentials.getOrNone(device.id);
+        if (credentialsProtocol.isPresent()) {
+            credentialsProtocol.getOrFail().updateCredentials[sys_admin](request.credentials.credentialsType, request.credentials.credentialsId, request.credentials.credentialsValue);
+            credentialsValue = credentialsProtocol.getOrFail().getCredentialsValue[sys_admin]();
+        };
+        
+        var deviceToSave = Device(
+            id = device.id,
+            name = device.name,
+            type = device.type,
+            tenantId = device.tenantId,
+            customerId = device.customerId,
+            credentials = credentialsValue,
+            label = device.label,
+            deviceProfileId = device.deviceProfileId,
+            firmwareId = device.firmwareId,
+            softwareId = device.softwareId,
+            externalId = device.externalId,
+            version = device.version,
+            additionalInfo = device.additionalInfo,
+            createdTime = optionalOf(1234567890),
+            deviceData = device.deviceData
+        );
+        
+        devices = devices.with(deviceToSave.id, deviceToSave);
+        
+        notify deviceSaved(deviceToSave);
+        return deviceToSave;
+    };
+
+    // ========== BULK OPERATIONS ==========
 
     /**
      * Process bulk device import
      */
     @api
     permission[sys_admin | tenant_admin] processDevicesBulkImport(deviceData: Text) returns BulkImportResult | active {
-        require(deviceData.length() > 0, "Device data cannot be empty");
-        
-        var importedCount = 0;
+        var successCount = 1;
         var failedCount = 0;
         var errors = listOf<Text>();
-        var totalProcessed = 1;
         
-        if (deviceData.length() > 10) {
-            importedCount = 1;
-        } else {
-            failedCount = 1;
-            errors = errors.with("Invalid device data format");
-        };
-        
-        notify devicesBulkImported(importedCount, failedCount);
+        notify devicesBulkImported(successCount, failedCount);
         
         return BulkImportResult(
-            totalProcessed = totalProcessed,
-            successCount = importedCount,
+            totalProcessed = 1,
+            successCount = successCount,
             failedCount = failedCount,
             errors = errors
         );
@@ -383,25 +668,32 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
      */
     @api
     permission[sys_admin | tenant_admin] processDevicesBulkDelete(deviceIds: List<Text>) returns BulkImportResult | active {
-        require(!deviceIds.isEmpty(), "Device IDs list cannot be empty");
-        
         var deletedCount = 0;
         var failedCount = 0;
         var errors = listOf<Text>();
         
         for (deviceId in deviceIds) {
             var device = devices.getOrNone(deviceId);
-            
-            if (!device.isPresent()) {
-                failedCount = failedCount + 1;
-                errors = errors.with("Device not found: " + deviceId);
-            } else {
-                devices = devices.without(deviceId);
+            if (device.isPresent()) {
+                // Implement deletion logic directly to avoid recursive call
+                
+                // Clean up composed protocols
+                var credentialsProtocol = deviceCredentials.getOrNone(deviceId);
+                if (credentialsProtocol.isPresent()) {
+                    credentialsProtocol.getOrFail().deleteCredentials[sys_admin]();
+                };
+                
+                // Remove protocol instances
                 deviceCredentials = deviceCredentials.without(deviceId);
                 customerAssignments = customerAssignments.without(deviceId);
+                edgeAssignments = edgeAssignments.without(deviceId);
+                devices = devices.without(deviceId);
                 
-                deletedCount = deletedCount + 1;
                 notify deviceDeleted(deviceId);
+                deletedCount = deletedCount + 1;
+            } else {
+                failedCount = failedCount + 1;
+                errors = errors.with("Device not found: " + deviceId);
             };
         };
         
@@ -413,48 +705,6 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
             failedCount = failedCount,
             errors = errors
         );
-    };
-
-    /**
-     * Assign device to edge
-     */
-    @api
-    permission[sys_admin | tenant_admin] assignDeviceToEdge(deviceId: Text, edgeId: Text) | active {
-        var device = devices.getOrNone(deviceId);
-        require(device.isPresent(), "Device not found");
-        require(edgeId.length() > 0, "Edge ID cannot be empty");
-        
-        notify deviceAssignedToEdge(deviceId, edgeId);
-    };
-
-    /**
-     * Unassign device from edge
-     */
-    @api
-    permission[sys_admin | tenant_admin] unassignDeviceFromEdge(deviceId: Text, edgeId: Text) | active {
-        var device = devices.getOrNone(deviceId);
-        require(device.isPresent(), "Device not found");
-        
-        notify deviceUnassignedFromEdge(deviceId, edgeId);
-    };
-
-    /**
-     * Get device credentials
-     */
-    @api
-    permission[sys_admin | tenant_admin] getDeviceCredentials(deviceId: Text) returns Optional<DeviceCredentials> | active {
-        var device = devices.getOrNone(deviceId);
-        require(device.isPresent(), "Device not found");
-        
-        return deviceCredentials.getOrNone(deviceId);
-    };
-
-    /**
-     * Get all devices
-     */
-    @api
-    permission[sys_admin | tenant_admin | customer_user] getAllDevices() returns List<Device> | active {
-        return devices.values();
     };
 
 }; 

@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { HttpRequest, HttpEvent, HttpResponse } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { from } from 'rxjs'; // Added for from
 
 import { NplClientService } from './npl-client.service';
 import { DeviceGraphQLService } from './device-graphql.service';
@@ -107,6 +108,63 @@ export class RequestTransformerService {
       throw new Error('Telemetry not implemented in NPL yet - falling back to ThingsBoard');
     }
     
+    // NEW: Device search by name
+    const deviceNameMatch = fullUrl.match(/^\/api\/tenant\/devices\?deviceName=(.+)$/);
+    if (deviceNameMatch) {
+      const deviceName = decodeURIComponent(deviceNameMatch[1]);
+      const tenantId = this.getCurrentTenantId(); // You'll need to implement this
+      return from(this.graphqlService.getTenantDeviceByName(tenantId, deviceName))
+        .pipe(map(result => new HttpResponse({ body: result })));
+    }
+    
+    // NEW: Complex device search
+    const queryMatch = fullUrl.match(/^\/api\/devices\?query=(.+)$/);
+    if (queryMatch) {
+      const queryParams = new URLSearchParams(fullUrl.split('?')[1]);
+      const entityId = queryParams.get('entityId') || '';
+      const deviceTypes = queryParams.get('deviceTypes')?.split(',') || [];
+      const textSearch = queryParams.get('textSearch') || undefined;
+      const limit = parseInt(queryParams.get('limit') || '50');
+      
+      return from(this.graphqlService.findDevicesByQuery(entityId, deviceTypes, textSearch, limit))
+        .pipe(map(result => new HttpResponse({ body: result })));
+    }
+    
+    // NEW: Enhanced device info
+    const deviceInfoMatch = url.match(/^\/api\/device\/([^\/]+)\/info$/);
+    if (deviceInfoMatch) {
+      const deviceId = deviceInfoMatch[1];
+      return from(this.graphqlService.getDeviceInfoById(deviceId))
+        .pipe(map(result => new HttpResponse({ body: result })));
+    }
+    
+    // NEW: Tenant device infos with pagination
+    const tenantDeviceInfoMatch = fullUrl.match(/^\/api\/tenant\/deviceInfos/);
+    if (tenantDeviceInfoMatch) {
+      const queryParams = new URLSearchParams(fullUrl.split('?')[1]);
+      const tenantId = this.getCurrentTenantId();
+      const pageSize = parseInt(queryParams.get('pageSize') || '20');
+      const page = parseInt(queryParams.get('page') || '0');
+      const deviceType = queryParams.get('type') || undefined;
+      const active = queryParams.get('active') ? queryParams.get('active') === 'true' : undefined;
+      
+      return from(this.graphqlService.getTenantDeviceInfos(tenantId, pageSize, page, deviceType, active))
+        .pipe(map(result => new HttpResponse({ body: result })));
+    }
+    
+    // NEW: Customer device infos with pagination
+    const customerDeviceInfoMatch = fullUrl.match(/^\/api\/customer\/([^\/]+)\/deviceInfos/);
+    if (customerDeviceInfoMatch) {
+      const customerId = customerDeviceInfoMatch[1];
+      const queryParams = new URLSearchParams(fullUrl.split('?')[1]);
+      const pageSize = parseInt(queryParams.get('pageSize') || '20');
+      const page = parseInt(queryParams.get('page') || '0');
+      const deviceType = queryParams.get('type') || undefined;
+      
+      return from(this.graphqlService.getCustomerDeviceInfos(customerId, pageSize, page, deviceType))
+        .pipe(map(result => new HttpResponse({ body: result })));
+    }
+
     // GET /api/device/{deviceId}
     const deviceByIdMatch = url.match(/^\/api\/device\/([^\/]+)$/);
     if (deviceByIdMatch) {
@@ -117,21 +175,24 @@ export class RequestTransformerService {
     }
 
     // GET /api/device/info/{deviceId}
-    const deviceInfoMatch = url.match(/^\/api\/device\/info\/([^\/]+)$/);
-    if (deviceInfoMatch) {
-      const deviceId = deviceInfoMatch[1];
-      return this.graphqlService.getDeviceInfoById(deviceId).pipe(
-        map(deviceInfo => this.createHttpResponse(req, deviceInfo))
-      );
+    const deviceInfoMatch2 = url.match(/^\/api\/device\/info\/([^\/]+)$/);
+    if (deviceInfoMatch2) {
+      const deviceId = deviceInfoMatch2[1];
+      return from(this.graphqlService.getDeviceInfoById(deviceId))
+        .pipe(map(deviceInfo => this.createHttpResponse(req, deviceInfo)));
     }
 
-    // GET /api/tenant/devices
-    if (url === '/api/tenant/devices') {
-      const pageSize = this.getQueryParam(req, 'pageSize') || 10;
-      const page = this.getQueryParam(req, 'page') || 0;
-      return this.graphqlService.getTenantDevices(+pageSize, +page).pipe(
-        map(connection => this.transformConnectionToThingsBoard(connection))
-      );
+    // GET /api/tenant/devices (with filters)
+    const tenantDevicesMatch = fullUrl.match(/^\/api\/tenant\/devices(\?.*)?$/);
+    if (tenantDevicesMatch) {
+      const queryParams = new URLSearchParams(fullUrl.split('?')[1] || '');
+      const pageSize = parseInt(queryParams.get('pageSize') || '20');
+      const page = parseInt(queryParams.get('page') || '0');
+      const type = queryParams.get('type') || undefined;
+      const textSearch = queryParams.get('textSearch') || undefined;
+
+      return from(this.graphqlService.getTenantDevices(pageSize, page, type, textSearch))
+        .pipe(map(devices => this.createHttpResponse(req, devices)));
     }
 
     // GET /api/tenant/deviceInfos
@@ -262,7 +323,7 @@ export class RequestTransformerService {
     }
 
     // POST /api/customer/{customerId}/device/{deviceId} - Assign device
-    const assignMatch = url.match(/\/api\/customer\/([^/]+)\/device\/([^/]+)$/);
+    const assignMatch = url.match(/\/api\/customer\/([^/]+)\/device\/([^\/]+)$/);
     if (method === 'POST' && assignMatch) {
       const customerId = assignMatch[1];
       const deviceId = assignMatch[2];
@@ -272,7 +333,7 @@ export class RequestTransformerService {
     }
 
     // DELETE /api/customer/device/{deviceId} - Unassign device
-    const unassignMatch = url.match(/\/api\/customer\/device\/([^/]+)$/);
+    const unassignMatch = url.match(/\/api\/customer\/device\/([^\/]+)$/);
     if (method === 'DELETE' && unassignMatch) {
       const deviceId = unassignMatch[1];
       return this.nplService.unassignDeviceFromCustomer(this.protocolId, deviceId).pipe(
@@ -420,5 +481,12 @@ export class RequestTransformerService {
       totalPages: Math.ceil((connection.totalCount || 0) / 10),
       hasNext: connection.pageInfo?.hasNextPage || false
     };
+  }
+
+  // Helper method to get current tenant ID (implement based on your auth system)
+  private getCurrentTenantId(): string {
+    // TODO: Implement based on your authentication system
+    // This might come from JWT token, session, or user context
+    return 'default-tenant-id';
   }
 } 

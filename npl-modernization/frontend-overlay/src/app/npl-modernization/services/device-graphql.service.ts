@@ -69,31 +69,337 @@ export interface DeviceCredentials {
 export class DeviceGraphQLService {
   constructor(private apollo: Apollo) {}
 
-  // Basic device queries (existing)
-  getDeviceById(deviceId: string): Observable<any> {
-    return this.apollo.query({
-      query: gql`
-        query GetDevice($deviceId: String!) {
-          protocolFieldsStructs(
-            filter: {
-              field: { equalTo: "id" },
-              value: { equalTo: $deviceId }
+  /**
+   * Get device by ID
+   */
+  async getDeviceById(deviceId: string): Promise<any> {
+    const query = `
+      query GetDeviceById($deviceId: String!) {
+        protocolFieldsStructs(condition: {
+          fieldName: "id",
+          value: $deviceId
+        }) {
+          edges {
+            node {
+              value
+              protocolId
+              created
             }
-          ) {
-            edges {
-              node {
-                value
-                protocolId
-                field
+          }
+        }
+      }
+    `;
+    return this.request(query, { deviceId });
+  }
+
+  // ========== NEW QUERY OPERATIONS (Moved from NPL) ==========
+
+  /**
+   * Find device by name within tenant (replaces getTenantDeviceByName)
+   */
+  async getTenantDeviceByName(tenantId: string, deviceName: string): Promise<any> {
+    const query = `
+      query GetTenantDeviceByName($tenantId: String!, $deviceName: String!) {
+        protocolFieldsStructs(condition: {
+          fieldName: "name",
+          value: $deviceName
+        }) {
+          edges {
+            node {
+              value
+              protocolId
+              created
+              # Filter by tenant in the result
+              tenantField: protocolFieldsStructs(condition: {
+                fieldName: "tenantId",
+                value: $tenantId,
+                protocolId: node.protocolId
+              }) {
+                edges { node { value } }
               }
             }
           }
         }
-      `,
-      variables: { deviceId }
-    }).pipe(
-      map((result: any) => this.transformDeviceResult(result))
-    );
+      }
+    `;
+    return this.request(query, { tenantId, deviceName });
+  }
+
+  /**
+   * Complex device search (replaces findDevicesByQuery)
+   */
+  async findDevicesByQuery(
+    entityId: string,
+    deviceTypes?: string[],
+    textSearch?: string,
+    limit: number = 50
+  ): Promise<any> {
+    const query = `
+      query FindDevicesByQuery(
+        $deviceTypes: [String!]
+        $textSearch: String
+        $limit: Int
+      ) {
+        protocolFieldsStructs(
+          condition: {
+            fieldName: "type"
+            ${deviceTypes ? `value: {in: $deviceTypes}` : ''}
+          }
+          ${textSearch ? `
+          filter: {
+            or: [
+              {fieldName: "name", value: {like: $textSearch}},
+              {fieldName: "label", value: {like: $textSearch}}
+            ]
+          }
+          ` : ''}
+          first: $limit
+        ) {
+          edges {
+            node {
+              value
+              protocolId
+              created
+            }
+          }
+          totalCount
+        }
+      }
+    `;
+    return this.request(query, { deviceTypes, textSearch, limit });
+  }
+
+  /**
+   * Get enhanced device information (replaces getDeviceInfoById)
+   */
+  async getDeviceInfoById(deviceId: string): Promise<any> {
+    const query = `
+      query GetDeviceInfo($deviceId: String!) {
+        device: protocolFieldsStructs(condition: {
+          protocolId: $deviceId
+        }) {
+          edges {
+            node {
+              value
+              created
+              protocolId
+              # Join customer information
+              customerInfo: protocolFieldsStructs(condition: {
+                fieldName: "customerId"
+                protocolId: $deviceId
+              }) {
+                edges { 
+                  node { 
+                    value 
+                    # Get customer title
+                    customerDetails: protocolFieldsStructs(condition: {
+                      protocolId: node.value
+                    }) {
+                      edges { node { value } }
+                    }
+                  } 
+                }
+              }
+              # Join device profile information
+              deviceProfile: protocolFieldsStructs(condition: {
+                fieldName: "deviceProfileId"
+                protocolId: $deviceId
+              }) {
+                edges { 
+                  node { 
+                    value
+                    profileDetails: protocolFieldsStructs(condition: {
+                      protocolId: node.value
+                    }) {
+                      edges { node { value } }
+                    }
+                  } 
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+    return this.request(query, { deviceId });
+  }
+
+  /**
+   * Get customer devices with enhanced info and pagination (replaces getCustomerDeviceInfos)
+   */
+  async getCustomerDeviceInfos(
+    customerId: string,
+    pageSize: number = 20,
+    page: number = 0,
+    deviceType?: string
+  ): Promise<any> {
+    const offset = page * pageSize;
+    const query = `
+      query GetCustomerDeviceInfos(
+        $customerId: String!
+        $pageSize: Int!
+        $offset: Int!
+        $deviceType: String
+      ) {
+        protocolFieldsStructs(
+          condition: {
+            fieldName: "customerId"
+            value: $customerId
+          }
+          ${deviceType ? `filter: {fieldName: "type", value: $deviceType}` : ''}
+          first: $pageSize
+          offset: $offset
+          orderBy: CREATED_DESC
+        ) {
+          edges {
+            node {
+              value
+              protocolId
+              created
+              # Get device details
+              deviceDetails: protocolFieldsStructs(condition: {
+                protocolId: node.protocolId
+              }) {
+                edges { node { value } }
+              }
+              # Get device profile info
+              profileInfo: protocolFieldsStructs(condition: {
+                fieldName: "deviceProfileId"
+                protocolId: node.protocolId
+              }) {
+                edges { node { value } }
+              }
+            }
+          }
+          totalCount
+          pageInfo {
+            hasNextPage
+            hasPreviousPage
+          }
+        }
+      }
+    `;
+    return this.request(query, { customerId, pageSize, offset, deviceType });
+  }
+
+  /**
+   * Get tenant devices with enhanced info and pagination (replaces getTenantDeviceInfos)
+   */
+  async getTenantDeviceInfos(
+    tenantId: string,
+    pageSize: number = 20,
+    page: number = 0,
+    deviceType?: string,
+    activeFilter?: boolean
+  ): Promise<any> {
+    const offset = page * pageSize;
+    const query = `
+      query GetTenantDeviceInfos(
+        $tenantId: String!
+        $pageSize: Int!
+        $offset: Int!
+        $deviceType: String
+      ) {
+        protocolFieldsStructs(
+          condition: {
+            fieldName: "tenantId"
+            value: $tenantId
+          }
+          ${deviceType ? `filter: {fieldName: "type", value: $deviceType}` : ''}
+          first: $pageSize
+          offset: $offset
+          orderBy: CREATED_DESC
+        ) {
+          edges {
+            node {
+              value
+              protocolId
+              created
+              # Get full device details
+              deviceDetails: protocolFieldsStructs(condition: {
+                protocolId: node.protocolId
+              }) {
+                edges { node { value } }
+              }
+              # Get customer assignment if any
+              customerAssignment: protocolFieldsStructs(condition: {
+                fieldName: "customerId"
+                protocolId: node.protocolId
+              }) {
+                edges { 
+                  node { 
+                    value
+                    customerTitle: protocolFieldsStructs(condition: {
+                      protocolId: node.value
+                    }) {
+                      edges { node { value } }
+                    }
+                  } 
+                }
+              }
+              # Get device profile
+              deviceProfile: protocolFieldsStructs(condition: {
+                fieldName: "deviceProfileId"
+                protocolId: node.protocolId
+              }) {
+                edges { node { value } }
+              }
+            }
+          }
+          totalCount
+          pageInfo {
+            hasNextPage
+            hasPreviousPage
+            startCursor
+            endCursor
+          }
+        }
+      }
+    `;
+    return this.request(query, { tenantId, pageSize, offset, deviceType });
+  }
+
+  // ========== HELPER METHODS ==========
+
+  /**
+   * Transform GraphQL device result to standard format
+   */
+  private transformDeviceResult(result: any): any {
+    if (!result?.protocolFieldsStructs?.edges?.length) {
+      return null;
+    }
+
+    const edge = result.protocolFieldsStructs.edges[0];
+    return {
+      id: edge.node.protocolId,
+      ...JSON.parse(edge.node.value),
+      created: edge.node.created
+    };
+  }
+
+  /**
+   * Transform paginated GraphQL result
+   */
+  private transformPaginatedResult(result: any): any {
+    if (!result?.protocolFieldsStructs) {
+      return { data: [], totalElements: 0, hasNext: false };
+    }
+
+    const edges = result.protocolFieldsStructs.edges || [];
+    const data = edges.map((edge: any) => ({
+      id: edge.node.protocolId,
+      ...JSON.parse(edge.node.value),
+      created: edge.node.created,
+      // Add enhanced info if available
+      customerTitle: edge.node.customerAssignment?.edges?.[0]?.node?.customerTitle?.edges?.[0]?.node?.value,
+      deviceProfileName: edge.node.deviceProfile?.edges?.[0]?.node?.value
+    }));
+
+    return {
+      data,
+      totalElements: result.protocolFieldsStructs.totalCount || 0,
+      hasNext: result.protocolFieldsStructs.pageInfo?.hasNextPage || false
+    };
   }
 
   /**
