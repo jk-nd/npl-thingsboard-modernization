@@ -154,6 +154,7 @@ services:
     environment:
       TB_HOST: "mytb-core"
       TB_PORT: "8080"
+      TB_ENABLE_PROXY: "true"
     networks:
       - npl-network
 
