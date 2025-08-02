@@ -40,7 +40,9 @@ echo "Building NPL overlay..."
 npm run build
 echo "Copying overlay files to correct location..."
 cp -r dist/frontend-overlay/* dist/npl-modernization/
-cp dist/npl-modernization/main.*.js dist/npl-modernization/npl-overlay.js
+# Find the main.js file and copy it as npl-overlay.js
+rm -f dist/npl-modernization/npl-overlay.js
+cp $(ls dist/npl-modernization/main.*.js | head -1) dist/npl-modernization/npl-overlay.js
 echo "✅ NPL overlay built and deployed"
 cd ../..
 
@@ -49,8 +51,7 @@ docker-compose up -d postgres rabbitmq
 
 wait_for_healthy "postgres"
 
-echo "--- Step 3: Initializing ThingsBoard database..."
-# This command runs the installation for the tb-node image
+echo "--- Step 3: Initializing ThingsBoard database with demo data..."
 docker-compose run --rm -e INSTALL_TB=true -e LOAD_DEMO=true -e "install_data_dir=/usr/share/thingsboard/data" mytb-core
 
 echo "--- Step 4: Starting NPL services..."
