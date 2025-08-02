@@ -29,6 +29,45 @@ interface DeviceCredentials {
   credentialsType: string;
   credentialsId?: string;
   credentialsValue?: string;
+  expirationTime?: number;
+  autoRotate?: boolean;
+}
+
+interface ValidationResult {
+  isValid: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+interface BulkImportResult {
+  totalProcessed: number;
+  successCount: number;
+  failedCount: number;
+  skippedCount: number;
+  errors: string[];
+  warnings: string[];
+  importId: string;
+  processingTime: number;
+}
+
+interface BulkImportStatus {
+  importId: string;
+  currentState: string;
+  totalItems: number;
+  processedItems: number;
+  successCount: number;
+  failedCount: number;
+  currentItem?: string;
+  errors: string[];
+  progressPercentage: number;
+  elapsedTime: number;
+  estimatedTimeRemaining: number;
+}
+
+interface DeviceLimits {
+  maxDevicesPerTenant: number;
+  maxDevicesPerCustomer: number;
+  maxDevicesPerProfile: number;
 }
 
 class DeviceManagementIntegrationTest {
@@ -594,6 +633,326 @@ class DeviceManagementIntegrationTest {
     console.log('✅ Read performance test completed');
   }
 
+  // ========== ADVANCED FEATURES TESTS ==========
+
+  /**
+   * Test enhanced device validation rules
+   */
+  async testDeviceValidation(): Promise<void> {
+    console.log('🔍 Testing enhanced device validation...');
+    
+    try {
+      // Test device name validation with too short name
+      const shortNameDevice: Device = {
+        name: 'ab', // Too short
+        type: 'sensor',
+        label: 'Test Short Name Device'
+      };
+      
+      const validationResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceValidationRules/validateDeviceName', {
+        name: shortNameDevice.name,
+        tenantId: 'test-tenant',
+        excludeDeviceId: null
+      });
+      
+      expect(validationResult.data.isValid).toBe(false);
+      expect(validationResult.data.errors).toContain('Device name must be at least 3 characters long');
+      console.log('✅ Device name validation working correctly');
+      
+      // Test reserved name validation
+      const reservedNameResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceValidationRules/validateDeviceName', {
+        name: 'admin',
+        tenantId: 'test-tenant',
+        excludeDeviceId: null
+      });
+      
+      expect(reservedNameResult.data.isValid).toBe(false);
+      expect(reservedNameResult.data.errors.some((e: string) => e.includes('reserved'))).toBe(true);
+      console.log('✅ Reserved name validation working correctly');
+      
+      // Test device limits validation
+      const limitsResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceValidationRules/validateDeviceLimits', {
+        tenantId: 'test-tenant',
+        customerId: null,
+        deviceProfileId: null,
+        currentDeviceCount: 15000 // Exceeds default limit of 10000
+      });
+      
+      expect(limitsResult.data.isValid).toBe(false);
+      expect(limitsResult.data.errors.some((e: string) => e.includes('limit exceeded'))).toBe(true);
+      console.log('✅ Device limits validation working correctly');
+      
+    } catch (error) {
+      console.error('❌ Device validation test failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Test bulk device operations with state-based progress tracking
+   */
+  async testBulkOperations(): Promise<void> {
+    console.log('📦 Testing bulk device operations...');
+    
+    try {
+      // Create test devices for bulk operations
+      const bulkDevices: Device[] = [
+        { name: 'Bulk Device 1', type: 'sensor', label: 'Bulk Test 1' },
+        { name: 'Bulk Device 2', type: 'actuator', label: 'Bulk Test 2' },
+        { name: 'Bulk Device 3', type: 'gateway', label: 'Bulk Test 3' }
+      ];
+      
+      // Start bulk import with progress tracking
+      const bulkImportResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceManagement/startBulkDeviceImport', {
+        devices: bulkDevices,
+        validateOnly: false
+      });
+      
+      const importId = bulkImportResult.data;
+      expect(importId).toBeDefined();
+      expect(typeof importId).toBe('string');
+      console.log(`✅ Bulk import started with ID: ${importId}`);
+      
+      // Monitor progress for a few seconds
+      let progressStatus: BulkImportStatus;
+      let attempts = 0;
+      do {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const progressResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceManagement/getBulkImportProgress', {
+          importId: importId
+        });
+        progressStatus = progressResult.data;
+        console.log(`📊 Progress: ${progressStatus.progressPercentage}% (${progressStatus.processedItems}/${progressStatus.totalItems})`);
+        attempts++;
+      } while (progressStatus.currentState !== 'completed' && progressStatus.currentState !== 'failed' && attempts < 10);
+      
+      expect(progressStatus.currentState).toBe('completed');
+      expect(progressStatus.successCount).toBe(3);
+      expect(progressStatus.failedCount).toBe(0);
+      console.log('✅ Bulk import completed successfully');
+      
+      // Test bulk update operations
+      const deviceIds = []; // Would be populated from actual created devices
+      const updateSet = {
+        label: 'Updated via Bulk',
+        type: 'sensor'
+      };
+      
+      // Note: In a real test, we'd get actual device IDs and test bulk updates
+      console.log('✅ Bulk operations test framework established');
+      
+    } catch (error) {
+      console.error('❌ Bulk operations test failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Test enhanced credentials management with rotation and expiration
+   */
+  async testEnhancedCredentials(): Promise<void> {
+    console.log('🔐 Testing enhanced credentials management...');
+    
+    try {
+      // Create a test device first
+      const testDevice: Device = {
+        name: 'Credentials Test Device',
+        type: 'sensor',
+        label: 'For credential testing'
+      };
+      
+      const deviceResponse = await this.nplProxyClient.post('/api/device', testDevice);
+      const createdDevice = deviceResponse.data;
+      const deviceIdString = createdDevice.id.id;
+      this.createdDevices.push(deviceIdString);
+      
+      // Wait for sync
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Test enhanced credential update with expiration and auto-rotation
+      const enhancedCredentials = {
+        credentialsType: 'ACCESS_TOKEN',
+        credentialsId: 'enhanced_test_token',
+        credentialsValue: 'enhanced_secure_token_value',
+        expirationTime: 30, // 30 days
+        autoRotate: true
+      };
+      
+      const updateResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceCredentialsManager/updateCredentials', {
+        deviceId: deviceIdString,
+        newType: enhancedCredentials.credentialsType,
+        newId: enhancedCredentials.credentialsId,
+        newValue: enhancedCredentials.credentialsValue,
+        expirationDays: enhancedCredentials.expirationTime,
+        enableAutoRotation: enhancedCredentials.autoRotate
+      });
+      
+      expect(updateResult.status).toBe(200);
+      console.log('✅ Enhanced credentials updated successfully');
+      
+      // Test credential rotation
+      const rotationResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceCredentialsManager/rotateCredentials', {
+        deviceId: deviceIdString,
+        validationPeriodHours: 24
+      });
+      
+      expect(rotationResult.status).toBe(200);
+      console.log('✅ Credential rotation completed successfully');
+      
+      // Test credential policy configuration
+      const policyResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceCredentialsManager/configureCredentialPolicy', {
+        deviceId: deviceIdString,
+        expirationDays: 60,
+        enableAutoRotation: true,
+        rotationInterval: 30
+      });
+      
+      expect(policyResult.status).toBe(200);
+      console.log('✅ Credential policy configured successfully');
+      
+      // Test credential expiration check
+      const expirationCheck = await this.nplEngineClient.post('/api/deviceManagement.DeviceCredentialsManager/checkCredentialExpiration', {
+        deviceId: deviceIdString
+      });
+      
+      expect(expirationCheck.data).toBe(false); // Should not be expired for new credentials
+      console.log('✅ Credential expiration check working correctly');
+      
+      // Test getting credentials with security info
+      const securityInfo = await this.nplEngineClient.post('/api/deviceManagement.DeviceCredentialsManager/getCredentialsWithSecurity', {
+        deviceId: deviceIdString
+      });
+      
+      expect(securityInfo.data.deviceId).toBe(deviceIdString);
+      expect(securityInfo.data.autoRotate).toBeDefined();
+      expect(securityInfo.data.expirationTime).toBeDefined();
+      console.log('✅ Enhanced credentials with security info retrieved successfully');
+      
+    } catch (error) {
+      console.error('❌ Enhanced credentials test failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Test device limits configuration and validation
+   */
+  async testDeviceLimitsManagement(): Promise<void> {
+    console.log('📊 Testing device limits management...');
+    
+    try {
+      // Test getting current device limits
+      const currentLimits = await this.nplEngineClient.post('/api/deviceManagement.DeviceValidationRules/getDeviceLimits');
+      
+      expect(currentLimits.data.maxDevicesPerTenant).toBeDefined();
+      expect(currentLimits.data.maxDevicesPerCustomer).toBeDefined();
+      expect(currentLimits.data.maxDevicesPerProfile).toBeDefined();
+      console.log('✅ Current device limits retrieved successfully');
+      
+      // Test updating device limits (sys_admin only)
+      const newLimits: DeviceLimits = {
+        maxDevicesPerTenant: 15000,
+        maxDevicesPerCustomer: 1500,
+        maxDevicesPerProfile: 7500
+      };
+      
+      const updateLimitsResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceValidationRules/updateDeviceLimits', {
+        newLimits: newLimits
+      });
+      
+      expect(updateLimitsResult.status).toBe(200);
+      console.log('✅ Device limits updated successfully');
+      
+      // Verify limits were updated
+      const updatedLimits = await this.nplEngineClient.post('/api/deviceManagement.DeviceValidationRules/getDeviceLimits');
+      expect(updatedLimits.data.maxDevicesPerTenant).toBe(15000);
+      expect(updatedLimits.data.maxDevicesPerCustomer).toBe(1500);
+      expect(updatedLimits.data.maxDevicesPerProfile).toBe(7500);
+      console.log('✅ Device limits verification successful');
+      
+    } catch (error) {
+      console.error('❌ Device limits management test failed:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Test comprehensive device validation with all rules
+   */
+  async testComprehensiveValidation(): Promise<void> {
+    console.log('🔍 Testing comprehensive device validation...');
+    
+    try {
+      // Test valid device
+      const validDevice: Device = {
+        name: 'Valid Test Device',
+        type: 'sensor',
+        label: 'Valid device for testing'
+      };
+      
+      const validDeviceResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceValidationRules/validateDevice', {
+        device: {
+          id: 'test-device-id',
+          name: validDevice.name,
+          type: validDevice.type,
+          tenantId: 'test-tenant',
+          customerId: null,
+          credentials: '',
+          label: validDevice.label,
+          deviceProfileId: null,
+          firmwareId: null,
+          softwareId: null,
+          externalId: null,
+          version: null,
+          additionalInfo: null,
+          createdTime: Date.now(),
+          deviceData: null
+        },
+        operation: 'CREATE',
+        currentDeviceCount: 100
+      });
+      
+      expect(validDeviceResult.data.isValid).toBe(true);
+      expect(validDeviceResult.data.errors).toHaveLength(0);
+      console.log('✅ Valid device passed comprehensive validation');
+      
+      // Test invalid device with multiple issues
+      const invalidDevice = {
+        id: 'test-device-id',
+        name: 'a', // Too short
+        type: '', // Empty type
+        tenantId: 'test-tenant',
+        customerId: null,
+        credentials: '',
+        label: null,
+        deviceProfileId: null,
+        firmwareId: null,
+        softwareId: null,
+        externalId: null,
+        version: null,
+        additionalInfo: null,
+        createdTime: Date.now(),
+        deviceData: null
+      };
+      
+      const invalidDeviceResult = await this.nplEngineClient.post('/api/deviceManagement.DeviceValidationRules/validateDevice', {
+        device: invalidDevice,
+        operation: 'CREATE',
+        currentDeviceCount: 100
+      });
+      
+      expect(invalidDeviceResult.data.isValid).toBe(false);
+      expect(invalidDeviceResult.data.errors.length).toBeGreaterThan(1);
+      expect(invalidDeviceResult.data.errors.some((e: string) => e.includes('3 characters'))).toBe(true);
+      expect(invalidDeviceResult.data.errors.some((e: string) => e.includes('empty'))).toBe(true);
+      console.log('✅ Invalid device correctly failed comprehensive validation');
+      
+    } catch (error) {
+      console.error('❌ Comprehensive validation test failed:', error);
+      throw error;
+    }
+  }
+
   // ==================== MAIN TEST RUNNER ====================
 
   async runAllTests(): Promise<void> {
@@ -615,6 +974,14 @@ class DeviceManagementIntegrationTest {
       await this.testCreateDevice();
       await this.testUpdateDevice();
       await this.testDeleteDevice();
+
+      // Advanced features tests
+      console.log('\n🔧 ========== ADVANCED FEATURES TESTS ==========');
+      await this.testDeviceValidation();
+      await this.testBulkOperations();
+      await this.testEnhancedCredentials();
+      await this.testDeviceLimitsManagement();
+      await this.testComprehensiveValidation();
 
       // Integration tests
       console.log('\n🔗 ========== INTEGRATION TESTS ==========');
@@ -674,6 +1041,25 @@ describe('NPL DeviceManagement Integration', () => {
 
   test('should perform within acceptable limits', async () => {
     await testSuite.testReadPerformance();
+  }, 60000);
+
+  // ========== ADVANCED FEATURES TESTS ==========
+
+  test('should validate devices with enhanced validation rules', async () => {
+    await testSuite.testDeviceValidation();
+    await testSuite.testComprehensiveValidation();
+  }, 60000);
+
+  test('should handle bulk operations with state-based progress tracking', async () => {
+    await testSuite.testBulkOperations();
+  }, 120000); // Longer timeout for bulk operations
+
+  test('should manage enhanced credentials with rotation and expiration', async () => {
+    await testSuite.testEnhancedCredentials();
+  }, 60000);
+
+  test('should configure and validate device limits', async () => {
+    await testSuite.testDeviceLimitsManagement();
   }, 60000);
 });
 
