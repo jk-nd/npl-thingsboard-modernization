@@ -51,6 +51,10 @@ export class RequestTransformerService {
       
       // Device credentials
       /^\/api\/device\/([^\/]+)\/credentials$/,       // GET /api/device/{id}/credentials
+      
+      // Telemetry endpoints - these should fall back to ThingsBoard since NPL doesn't have telemetry yet
+      /^\/api\/plugins\/telemetry\/DEVICE\/([^\/]+)\/values\/timeseries$/,  // GET telemetry timeseries
+      /^\/api\/plugins\/telemetry\/DEVICE\/([^\/]+)\/values\/attributes$/,  // GET device attributes
     ];
 
     return readEndpoints.some(pattern => pattern.test(url));
@@ -94,6 +98,14 @@ export class RequestTransformerService {
     const fullUrl = req.url;
     // Extract pathname without query parameters for pattern matching
     const url = fullUrl.split('?')[0];
+    
+    // Telemetry endpoints - fall back to ThingsBoard since NPL doesn't have telemetry yet
+    const telemetryMatch = url.match(/^\/api\/plugins\/telemetry\/DEVICE\/([^\/]+)\/values\/(timeseries|attributes)$/);
+    if (telemetryMatch) {
+      // For now, telemetry requests should fall back to ThingsBoard
+      // In the future, this could be routed to NPL telemetry services
+      throw new Error('Telemetry not implemented in NPL yet - falling back to ThingsBoard');
+    }
     
     // GET /api/device/{deviceId}
     const deviceByIdMatch = url.match(/^\/api\/device\/([^\/]+)$/);
