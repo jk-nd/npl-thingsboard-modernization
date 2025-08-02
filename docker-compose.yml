@@ -10,8 +10,8 @@ services:
       POSTGRES_PASSWORD: welcome123
       POSTGRES_MULTIPLE_DATABASES: "thingsboard,npl_engine"
     volumes:
-      - ./thingsboard_postgres_data:/var/lib/postgresql/data
-      - ./init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.sh
+      - postgres_data:/var/lib/postgresql/data
+      - ./npl-modernization/init-multiple-dbs.sh:/docker-entrypoint-initdb.d/init-multiple-dbs.shmultiple-dbs.sh
     networks:
       - npl-network
     healthcheck:
@@ -117,9 +117,9 @@ services:
     networks:
       - npl-network
 
-  mytb:
+  mytb-core:
     restart: always
-    image: "thingsboard/tb-postgres:3.4.4"
+    image: "thingsboard/tb-node:3.4.4"
     ports:
       - "9090:8080"
       - "1883:1883"
@@ -129,15 +129,31 @@ services:
       SPRING_DATASOURCE_URL: "jdbc:postgresql://postgres:5432/thingsboard"
       SPRING_DATASOURCE_USERNAME: "postgres"
       SPRING_DATASOURCE_PASSWORD: "welcome123"
-      INSTALL_TB: "true"
-      LOAD_DEMO: "true"
       TB_SERVICE_ID: "tb-node"
+      # Disable OAuth2 and web authentication features
+      SECURITY_OAUTH2_ENABLED: "false"
+      SECURITY_JWT_TOKEN_SIGNING_KEY: "thingsboardDefaultSigningKey"
+      # Enable all web endpoints
+      TB_APPS_RULE_ENGINE_ENABLED: "true"
+      TB_APPS_WEB_ENABLED: "true"
+      TB_TRANSPORT_HTTP_ENABLED: "true"
+      TB_TRANSPORT_MQTT_ENABLED: "true"
     volumes:
       - tb-data:/data
-      - tb-logs:/var/log/thingsboard
+      - ./docker/tb-node/conf:/config
     depends_on:
       postgres:
         condition: service_healthy
+    networks:
+      - npl-network
+
+  mytb-ui:
+    image: "thingsboard/tb-web-ui:latest"
+    ports:
+      - "8082:8090"
+    environment:
+      TB_HOST: "mytb-core"
+      TB_PORT: "8080"
     networks:
       - npl-network
 
@@ -147,9 +163,9 @@ services:
       - "8081:80"
     volumes:
       - ./nginx-proxy.conf:/etc/nginx/conf.d/default.conf
-      - ./npl-modernization/overlay:/usr/share/nginx/html/assets/overlay
+      - ./npl-modernization/overlay:/assets/overlay
     depends_on:
-      - mytb
+      - mytb-ui
     networks:
       - npl-network
 
