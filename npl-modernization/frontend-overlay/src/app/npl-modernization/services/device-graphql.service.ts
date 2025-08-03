@@ -70,6 +70,16 @@ export class DeviceGraphQLService {
   constructor(private apollo: Apollo) {}
 
   /**
+   * Generic GraphQL request method
+   */
+  private async request(query: string, variables: any = {}): Promise<any> {
+    return this.apollo.query({
+      query: gql`${query}`,
+      variables
+    }).toPromise().then((result: any) => result.data);
+  }
+
+  /**
    * Get device by ID
    */
   async getDeviceById(deviceId: string): Promise<any> {
@@ -359,54 +369,50 @@ export class DeviceGraphQLService {
     return this.request(query, { tenantId, pageSize, offset, deviceType });
   }
 
-  // ========== HELPER METHODS ==========
-
   /**
-   * Transform GraphQL device result to standard format
+   * Get device limits configuration
+   * Maps to: GET /api/device/limits
    */
-  private transformDeviceResult(result: any): any {
-    if (!result?.protocolFieldsStructs?.edges?.length) {
-      return null;
-    }
-
-    const edge = result.protocolFieldsStructs.edges[0];
-    return {
-      id: edge.node.protocolId,
-      ...JSON.parse(edge.node.value),
-      created: edge.node.created
-    };
+  async getDeviceLimits(): Promise<any> {
+    const query = `
+      query GetDeviceLimits {
+        deviceLimits: protocolFieldsStructs(
+          condition: {
+            fieldName: "maxDevicesPerTenant"
+            protocolName: "deviceManagement.DeviceManagement"
+          }
+        ) {
+          edges {
+            node {
+              value
+              # Get related limits
+              maxCustomer: protocolFieldsStructs(condition: {
+                fieldName: "maxDevicesPerCustomer"
+                protocolId: node.protocolId
+              }) {
+                edges { node { value } }
+              }
+              maxProfile: protocolFieldsStructs(condition: {
+                fieldName: "maxDevicesPerProfile" 
+                protocolId: node.protocolId
+              }) {
+                edges { node { value } }
+              }
+            }
+          }
+        }
+      }
+    `;
+    return this.request(query, {});
   }
 
-  /**
-   * Transform paginated GraphQL result
-   */
-  private transformPaginatedResult(result: any): any {
-    if (!result?.protocolFieldsStructs) {
-      return { data: [], totalElements: 0, hasNext: false };
-    }
-
-    const edges = result.protocolFieldsStructs.edges || [];
-    const data = edges.map((edge: any) => ({
-      id: edge.node.protocolId,
-      ...JSON.parse(edge.node.value),
-      created: edge.node.created,
-      // Add enhanced info if available
-      customerTitle: edge.node.customerAssignment?.edges?.[0]?.node?.customerTitle?.edges?.[0]?.node?.value,
-      deviceProfileName: edge.node.deviceProfile?.edges?.[0]?.node?.value
-    }));
-
-    return {
-      data,
-      totalElements: result.protocolFieldsStructs.totalCount || 0,
-      hasNext: result.protocolFieldsStructs.pageInfo?.hasNextPage || false
-    };
-  }
+  // ========== OBSERVABLE-BASED METHODS (for backward compatibility) ==========
 
   /**
    * Get device info by ID - enhanced version with additional metadata
    * Maps to: GET /api/device/info/{deviceId}
    */
-  getDeviceInfoById(deviceId: string): Observable<DeviceInfo | null> {
+  getDeviceInfoByIdObservable(deviceId: string): Observable<DeviceInfo | null> {
     return this.apollo.query({
       query: gql`
         query GetDeviceInfo($deviceId: String!) {
@@ -475,7 +481,7 @@ export class DeviceGraphQLService {
    * Get customer device infos with enhanced metadata
    * Maps to: GET /api/customer/{customerId}/deviceInfos
    */
-  getCustomerDeviceInfos(customerId: string, pageSize: number = 10, page: number = 0): Observable<DeviceInfo[]> {
+  getCustomerDeviceInfosObservable(customerId: string, pageSize: number = 10, page: number = 0): Observable<DeviceInfo[]> {
     return this.getCustomerDevices(customerId, pageSize, page).pipe(
       map(connection => this.transformDeviceInfosFromConnection(connection))
     );
@@ -820,6 +826,8 @@ export class DeviceGraphQLService {
       }))
     );
   }
+
+  // ========== HELPER METHODS ==========
 
   private transformDeviceResult(result: any): any {
     const edges = result.data?.protocolFieldsStructs?.edges || [];

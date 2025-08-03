@@ -50,6 +50,15 @@ struct SaveDeviceWithCredentialsRequest {
 };
 
 /**
+ * Device limits configuration
+ */
+struct DeviceLimits {
+    maxDevicesPerTenant: Number,
+    maxDevicesPerCustomer: Number,
+    maxDevicesPerProfile: Number
+};
+
+/**
  * Notifications
  */
 notification deviceSaved(device: Device) returns Unit;
@@ -687,99 +696,63 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
     // ========== BULK OPERATIONS ==========
 
     /**
-     * Bulk create devices with validation
+     * Simple bulk device creation
+     * UI handles progress tracking and error management
      */
     @api
-    permission[sys_admin | tenant_admin] bulkCreateDevices(devices: List<Device>) returns BulkImportResult | active {
-        var startTime = now();
+    permission[sys_admin | tenant_admin] bulkCreateDevices(deviceList: List<Device>) returns BulkImportResult | active {
         var successCount = 0;
         var failedCount = 0;
         var errors = listOf<Text>();
-        var warnings = listOf<Text>();
         
-        for (device in devices) {
-            try {
-                var savedDevice = saveDevice(device);
+        for (device in deviceList) {
+            // Basic validation
+            if (device.name.length() >= 3 && device.type.length() > 0) {
+                this.devices = this.devices.with(device.id, device);
+                notify deviceSaved(device);
                 successCount = successCount + 1;
-            } catch (error) {
+            } else {
                 failedCount = failedCount + 1;
-                errors = errors.with("Device " + device.name + ": " + error.toText());
+                errors = errors.with("Invalid device: " + device.name);
             };
         };
-        
-        var endTime = now();
-        var processingTime = endTime - startTime;
-        
-        return BulkImportResult(
-            totalProcessed = devices.size(),
-            successCount = successCount,
-            failedCount = failedCount,
-            skippedCount = 0,
-            errors = errors,
-            warnings = warnings,
-            importId = "bulk_" + startTime.toText(),
-            processingTime = processingTime
-        );
-    };
-    
-    /**
-     * Process bulk device import
-     */
-    @api
-    permission[sys_admin | tenant_admin] processDevicesBulkImport(deviceData: Text) returns BulkImportResult | active {
-        var successCount = 1;
-        var failedCount = 0;
-        var errors = listOf<Text>();
         
         notify devicesBulkImported(successCount, failedCount);
         
         return BulkImportResult(
-            totalProcessed = 1,
+            totalProcessed = deviceList.size(),
             successCount = successCount,
             failedCount = failedCount,
             errors = errors
         );
     };
-
+    
     /**
-     * Process bulk device deletion
+     * Simple bulk device deletion
+     * UI handles progress tracking and error management
      */
     @api
     permission[sys_admin | tenant_admin] processDevicesBulkDelete(deviceIds: List<Text>) returns BulkImportResult | active {
-        var deletedCount = 0;
+        var successCount = 0;
         var failedCount = 0;
         var errors = listOf<Text>();
         
         for (deviceId in deviceIds) {
-            var device = devices.getOrNone(deviceId);
-            if (device.isPresent()) {
-                // Implement deletion logic directly to avoid recursive call
-                
-                // Clean up composed protocols
-                var credentialsProtocol = deviceCredentials.getOrNone(deviceId);
-                if (credentialsProtocol.isPresent()) {
-                    credentialsProtocol.getOrFail().deleteCredentials[sys_admin]();
-                };
-                
-                // Remove protocol instances
-                deviceCredentials = deviceCredentials.without(deviceId);
-                customerAssignments = customerAssignments.without(deviceId);
-                edgeAssignments = edgeAssignments.without(deviceId);
-                devices = devices.without(deviceId);
-                
+            if (this.devices.getOrNone(deviceId).isPresent()) {
+                this.devices = this.devices.without(deviceId);
                 notify deviceDeleted(deviceId);
-                deletedCount = deletedCount + 1;
+                successCount = successCount + 1;
             } else {
                 failedCount = failedCount + 1;
                 errors = errors.with("Device not found: " + deviceId);
             };
         };
         
-        notify devicesBulkDeleted(deletedCount, failedCount);
+        notify devicesBulkDeleted(successCount, failedCount);
         
         return BulkImportResult(
             totalProcessed = deviceIds.size(),
-            successCount = deletedCount,
+            successCount = successCount,
             failedCount = failedCount,
             errors = errors
         );

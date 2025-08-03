@@ -94,7 +94,8 @@ function test_device_creation_by_customer_user_should_fail(test: Test) -> {
 function test_get_device_by_id_sys_admin(test: Test) -> {
     var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
     
-    var device = deviceManagement.getDeviceById['sys_admin']("test-device-001");
+    var deviceOptional = deviceManagement.getDeviceById['sys_admin']("test-device-001");
+    var device = deviceOptional.getOrFail();
     
     test.assertEquals("test-device-001", device.id, "Device ID should match");
     test.assertTrue(device.id.length() > 0, "Device should not be null");
@@ -104,7 +105,8 @@ function test_get_device_by_id_sys_admin(test: Test) -> {
 function test_get_device_by_id_tenant_admin(test: Test) -> {
     var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
     
-    var device = deviceManagement.getDeviceById['tenant_admin']("test-device-001");
+    var deviceOptional = deviceManagement.getDeviceById['tenant_admin']("test-device-001");
+    var device = deviceOptional.getOrFail();
     
     test.assertEquals("test-device-001", device.id, "Tenant admin should be able to get device");
     test.assertTrue(device.id.length() > 0, "Device should not be null");
@@ -114,7 +116,8 @@ function test_get_device_by_id_tenant_admin(test: Test) -> {
 function test_get_device_by_id_customer_user(test: Test) -> {
     var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
     
-    var device = deviceManagement.getDeviceById['customer_user']("test-device-001");
+    var deviceOptional = deviceManagement.getDeviceById['customer_user']("test-device-001");
+    var device = deviceOptional.getOrFail();
     
     test.assertEquals("test-device-001", device.id, "Customer user should be able to get device");
     test.assertTrue(device.id.length() > 0, "Device should not be null");
@@ -348,7 +351,8 @@ function test_device_operations_workflow(test: Test) -> {
     test.assertEquals(newDevice.id, createdDevice.id, "Device should be created successfully");
     
     // 2. Retrieve device
-    var retrievedDevice = deviceManagement.getDeviceById['sys_admin'](newDevice.id);
+    var retrievedDeviceOptional = deviceManagement.getDeviceById['sys_admin'](newDevice.id);
+    var retrievedDevice = retrievedDeviceOptional.getOrFail();
     test.assertEquals(newDevice.id, retrievedDevice.id, "Device should be retrievable");
     
     // 3. Assign to customer
@@ -390,7 +394,8 @@ function test_permission_validation_sys_admin_full_access(test: Test) -> {
     var savedDevice = deviceManagement.saveDevice['sys_admin'](testDevice);
     test.assertEquals(testDevice.id, savedDevice.id, "Sys admin should be able to save device");
     
-    var retrievedDevice = deviceManagement.getDeviceById['sys_admin'](testDevice.id);
+    var retrievedDeviceOptional = deviceManagement.getDeviceById['sys_admin'](testDevice.id);
+    var retrievedDevice = retrievedDeviceOptional.getOrFail();
     test.assertEquals(testDevice.id, retrievedDevice.id, "Sys admin should be able to get device");
     
     deviceManagement.assignDeviceToCustomer['sys_admin'](testDevice.id, "customer-001");
@@ -429,7 +434,8 @@ function test_permission_validation_tenant_admin_limited_access(test: Test) -> {
     var savedDevice = deviceManagement.saveDevice['tenant_admin'](testDevice);
     test.assertEquals(testDevice.id, savedDevice.id, "Tenant admin should be able to save device");
     
-    var retrievedDevice = deviceManagement.getDeviceById['tenant_admin'](testDevice.id);
+    var retrievedDeviceOptional = deviceManagement.getDeviceById['tenant_admin'](testDevice.id);
+    var retrievedDevice = retrievedDeviceOptional.getOrFail();
     test.assertEquals(testDevice.id, retrievedDevice.id, "Tenant admin should be able to get device");
     
     deviceManagement.assignDeviceToCustomer['tenant_admin'](testDevice.id, "customer-001");
@@ -444,7 +450,8 @@ function test_permission_validation_customer_user_read_only(test: Test) -> {
     var deviceManagement = DeviceManagement['sys_admin', 'tenant_admin', 'customer_user']();
     
     // Customer user should only have read access
-    var retrievedDevice = deviceManagement.getDeviceById['customer_user']("test-device-001");
+    var retrievedDeviceOptional = deviceManagement.getDeviceById['customer_user']("test-device-001");
+    var retrievedDevice = retrievedDeviceOptional.getOrFail();
     test.assertEquals("test-device-001", retrievedDevice.id, "Customer user should be able to get device");
     
     // Customer user should not be able to perform write operations

@@ -46,6 +46,9 @@ export class RequestTransformerService {
       // Device counts
       /^\/api\/devices\/count\/([^\/]+)\/([^\/]+)$/,  // GET /api/devices/count/{type}/{profileId}
       
+      // Enhanced features - Device limits (read operation)
+      /^\/api\/device\/limits$/,                      // GET /api/device/limits
+      
       // Basic device queries - these should come LAST to avoid conflicts
       /^\/api\/device\/([^\/]+)$/,                    // GET /api/device/{id}
       /^\/api\/device\/info\/([^\/]+)$/,              // GET /api/device/info/{id}
@@ -85,6 +88,13 @@ export class RequestTransformerService {
       
       // Device claiming
       { pattern: /^\/api\/customer\/device\/([^\/]+)\/claim$/, methods: ['POST', 'DELETE'] }, // Claim/Reclaim
+      
+      // Enhanced features - Bulk operations
+      { pattern: /^\/api\/devices\/bulk$/, methods: ['POST'] },                          // Bulk create devices
+      { pattern: /^\/api\/devices\/bulk\/import$/, methods: ['POST'] },                 // Bulk import devices
+      
+      // Enhanced features - Device limits management
+      { pattern: /^\/api\/device\/limits$/, methods: ['PUT'] },                          // Update device limits
     ];
 
     return writeEndpoints.some(endpoint => 
@@ -169,7 +179,7 @@ export class RequestTransformerService {
     const deviceByIdMatch = url.match(/^\/api\/device\/([^\/]+)$/);
     if (deviceByIdMatch) {
       const deviceId = deviceByIdMatch[1];
-      return this.graphqlService.getDeviceById(deviceId).pipe(
+      return from(this.graphqlService.getDeviceById(deviceId)).pipe(
         map(device => this.createHttpResponse(req, device))
       );
     }
@@ -191,8 +201,9 @@ export class RequestTransformerService {
       const type = queryParams.get('type') || undefined;
       const textSearch = queryParams.get('textSearch') || undefined;
 
-      return from(this.graphqlService.getTenantDevices(pageSize, page, type, textSearch))
-        .pipe(map(devices => this.createHttpResponse(req, devices)));
+      return this.graphqlService.getTenantDevices(pageSize, page).pipe(
+        map(devices => this.createHttpResponse(req, devices))
+      );
     }
 
     // GET /api/tenant/deviceInfos
@@ -221,8 +232,8 @@ export class RequestTransformerService {
       const customerId = customerDeviceInfosMatch[1];
       const pageSize = this.getQueryParam(req, 'pageSize') || 10;
       const page = this.getQueryParam(req, 'page') || 0;
-      return this.graphqlService.getCustomerDeviceInfos(customerId, +pageSize, +page).pipe(
-        map(deviceInfos => this.createHttpResponse(req, { data: deviceInfos, totalElements: deviceInfos.length }))
+      return from(this.graphqlService.getCustomerDeviceInfos(customerId, +pageSize, +page)).pipe(
+        map((deviceInfos: any) => this.createHttpResponse(req, { data: deviceInfos, totalElements: deviceInfos.length }))
       );
     }
 
@@ -280,6 +291,12 @@ export class RequestTransformerService {
       return this.graphqlService.countDevicesByProfile(deviceProfileId, otaPackageType).pipe(
         map(count => this.createHttpResponse(req, count))
       );
+    }
+
+    // GET /api/device/limits
+    if (url === '/api/device/limits') {
+      return from(this.graphqlService.getDeviceLimits())
+        .pipe(map(result => new HttpResponse({ body: result })));
     }
 
     // If no GraphQL route matches, throw an error
