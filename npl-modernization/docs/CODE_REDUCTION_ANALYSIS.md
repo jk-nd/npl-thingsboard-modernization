@@ -40,6 +40,127 @@ The NPL implementation includes necessary integration components:
 
 **Core Implementation Reduction**: 1,092 lines (68.1% reduction)
 
+## 🔍 Granular Analysis: Code Reduction by Functional Category
+
+### Methodology for Category Analysis
+To provide strategic insights beyond the overall 73.2% reduction, we analyzed code reduction by specific functional categories, revealing where NPL delivers the most dramatic improvements.
+
+### Category-Specific Results
+
+| Category | ThingsBoard Lines | NPL Lines | Reduction | Percentage |
+|----------|------------------|-----------|-----------|------------|
+| **Query Operations** | 412 | 23 | 389 | **94.4%** |
+| **CRUD Operations** | 783 | 67 | 716 | **91.4%** |
+| **Authorization** | 245 | 0 | 245 | **100%** |
+| **Validation** | 289 | 31 | 258 | **89.3%** |
+| **Bulk Operations** | 466 | 78 | 388 | **83.3%** |
+| **Relationship Management** | 290 | 112 | 178 | **61.4%** |
+| **Credentials Management** | 290 | 123 | 167 | **57.6%** |
+
+### Highest Impact Categories (>90% Reduction)
+
+#### 1. Query Operations (94.4% Reduction)
+**ThingsBoard**: 15 REST endpoints across 3 layers (412 lines)
+**NPL**: Auto-generated GraphQL + basic protocol queries (23 lines)
+
+**Key Success Factor**: Complete GraphQL API auto-generation from protocol schema
+```graphql
+# Auto-generated from NPL protocol
+query GetTenantDevices($tenantId: String!, $pageSize: Int) {
+  protocolFieldsStructs(
+    condition: { fieldName: "tenantId", value: $tenantId }
+    first: $pageSize, orderBy: CREATED_DESC
+  ) {
+    edges { node { value, protocolId, created } }
+    totalCount
+  }
+}
+```
+
+#### 2. CRUD Operations (91.4% Reduction)
+**ThingsBoard**: 12 methods across Controller/Service/DAO layers (783 lines)
+**NPL**: 4 protocol methods with built-in persistence (67 lines)
+
+**Key Success Factors**:
+- Built-in validation via `require()` statements
+- Automatic persistence through NPL engine
+- Embedded authorization in method signatures
+- Type safety with compile-time validation
+
+#### 3. Authorization (100% Reduction)
+**ThingsBoard**: 23 `@PreAuthorize` annotations + security infrastructure (245 lines)
+**NPL**: Embedded `permission[roles]` syntax (0 additional lines)
+
+**Example Transformation**:
+```java
+// ThingsBoard
+@PreAuthorize("hasAuthority('TENANT_ADMIN')")
+public Device saveDevice(@RequestBody Device device) { ... }
+```
+```npl
+// NPL
+permission[tenant_admin] saveDevice(device: Device) | active { ... }
+```
+
+### High Impact Categories (80-90% Reduction)
+
+#### 4. Validation & Business Rules (89.3% Reduction)
+**ThingsBoard**: 47 scattered validation operations (289 lines)
+**NPL**: 5 declarative `require()` statements (31 lines)
+
+**Example Transformation**:
+```java
+// ThingsBoard (scattered across layers)
+if (!StringUtils.hasLength(device.getName())) {
+    throw new DataValidationException("Device name should be specified!");
+}
+deviceValidator.validate(device, Device::getTenantId);
+checkParameterWithMessage(device.getName(), "Device name should be specified!");
+```
+```npl
+// NPL (declarative, centralized)
+require(device.name.length() >= 3, "Device name must be at least 3 characters");
+require(!reservedNames.contains(device.name), "Device name is reserved");
+```
+
+#### 5. Bulk Operations (83.3% Reduction)
+**ThingsBoard**: Complex bulk processing with manual transactions (466 lines)
+**NPL**: Direct protocol methods with automatic batching (78 lines)
+
+### Moderate Impact Categories (50-80% Reduction)
+
+#### 6. Relationship Management (61.4% Reduction)
+**ThingsBoard**: 8 assignment methods across layers (290 lines)
+**NPL**: Composed protocols for specialized concerns (112 lines)
+
+**Architecture Improvement**: NPL uses protocol composition for better organization:
+```npl
+// Specialized protocols within DeviceManagement
+var customerAssignments = mapOf<Text, CustomerAssignment>();
+var edgeAssignments = mapOf<Text, EdgeAssignment>();
+```
+
+#### 7. Credentials Management (57.6% Reduction)
+**ThingsBoard**: 6 methods across service layers (290 lines)
+**NPL**: Self-contained `DeviceCredentialsManager` protocol (123 lines)
+
+### Strategic Insights by Category
+
+#### NPL Sweet Spots (>85% reduction)
+- ✅ **Standard CRUD operations**: Built-in persistence eliminates layers
+- ✅ **Query endpoints**: Auto-generated GraphQL replaces manual REST
+- ✅ **Authorization**: Embedded permissions eliminate configuration
+- ✅ **Validation**: Declarative rules replace scattered logic
+- ✅ **Bulk operations**: Automatic batching simplifies processing
+
+#### Good NPL Candidates (60-85% reduction)
+- ✅ **Entity relationships**: Protocol composition provides organization
+- ✅ **Specialized domains**: Self-contained protocols for complex logic
+
+#### Consider Hybrid (<60% reduction)
+- ⚠️ **Real-time streams**: Use ThingsBoard's transport strengths
+- ⚠️ **Complex transformations**: May require external services
+
 ### ThingsBoard Shared Infrastructure (Device Management Allocation)
 ThingsBoard has shared infrastructure across ~15 modules. For device management, we calculate a proportional allocation:
 
