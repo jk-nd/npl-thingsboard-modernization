@@ -34,6 +34,115 @@ protocol[tenant_admin, customer_user] DeviceManagement() {
 - Data processing pipelines
 - Alerting and rule engine for telemetry
 
+## HTTP Interceptor Overlay Integration Approach
+
+### Executive Summary
+
+The core of our modernization strategy is a **UI Interceptor Overlay**. This is a small, injectable frontend application that runs alongside the original ThingsBoard UI. It intercepts outgoing API calls from the user's browser and intelligently reroutes them to either the new NPL backend or the original ThingsBoard backend, based on a centralized routing configuration.
+
+This approach allows for a gradual, feature-by-feature migration with minimal risk, requiring no changes to the legacy frontend codebase. The process is designed to be highly efficient and scalable for ongoing development.
+
+### The 3 Key Steps of the Process
+
+The entire process can be broken down into three main stages: **Injection**, **Interception**, and **Transformation & Routing**.
+
+#### Step 1: Injection (via Nginx Proxy)
+
+The overlay code is injected into the main ThingsBoard application at runtime.
+
+- The **Nginx Proxy** (`npl-proxy` service) acts as the entry point for all UI traffic.
+- When a user loads the application, Nginx serves the standard ThingsBoard UI but uses a `sub_filter` to dynamically inject a `<script>` tag pointing to our overlay bundle (`npl-overlay.js`) just before the closing `</body>` tag.
+- This ensures our custom code is loaded and executed within the context of the original ThingsBoard Angular application.
+
+#### Step 2: Interception (via Angular `HttpInterceptor`)
+
+Once injected, the overlay "catches" all API calls before they are sent.
+
+- The `npl-overlay.js` bundle registers a standard **Angular `HttpInterceptor`**.
+- This interceptor acts as a middleware for *every single HTTP request* the UI makes.
+- It effectively gives our overlay the power to inspect, modify, and control every API call initiated by the frontend.
+
+#### Step 3: Transformation & Routing (via `RequestTransformerService`)
+
+This is the "brain" of the overlay, where the decision-making happens. The `HttpInterceptor` passes every caught request to the `RequestTransformerService`, which follows a clear set of rules:
+
+1. **Is it a READ operation we want to handle?**
+   - The service checks if the request is a `GET` method and if the URL matches a predefined regex of read patterns (e.g., `/api/tenant/devices`, `/api/device/{id}`).
+   - **If it matches:** The request is transformed into a **GraphQL query**. This new query is sent to the **NPL Read Model**. The GraphQL response is then re-shaped into the exact JSON format the legacy ThingsBoard UI expects.
+
+2. **Is it a WRITE operation we want to handle?**
+   - The service checks if the request is a `POST`, `PUT`, or `DELETE` method and if its URL matches a predefined regex of write patterns (e.g., `/api/device`).
+   - **If it matches:** The request is transformed into an API call to the **NPL Engine** to execute the corresponding permission on the NPL protocol.
+
+3. **If it's neither of the above?**
+   - If the request URL doesn't match any of our modernization patterns (e.g., `/api/dashboards`), the transformer service does **nothing**.
+   - It passes the original, untouched request along to be handled by the legacy **`mytb-core`** backend.
+
+### Data Flow Diagram
+
+This diagram illustrates the decision-making process for an API call originating from the browser.
+
+```mermaid
+graph TD
+    subgraph Browser
+        A[ThingsBoard UI] --> B{HTTP Request<br/>e.g., GET /api/tenant/devices};
+        C[NPL Overlay Interceptor] -- Catches Request --> D{Request Transformer Service};
+    end
+
+    B -.-> C;
+
+    subgraph Routing Logic in Transformer
+        D -- Is it a handled READ?<br/>(e.g., /api/devices) --> E[Yes: Transform to GraphQL];
+        D -- Is it a handled WRITE?<br/>(e.g., /api/device) --> F[Yes: Transform to NPL Call];
+        D -- No Match --> G[No: Pass Through Unchanged];
+    end
+
+    subgraph NPL Backend
+        E --> H[NPL Read Model<br/>:5555];
+        F --> I[NPL Engine<br/>:12000];
+        H --> J[npl_engine DB];
+        I --> J;
+    end
+    
+    subgraph Original ThingsBoard Backend
+        G --> K[Nginx Proxy<br/>:8081]
+        K --> L[mytb-core<br/>:9090];
+        L --> M[thingsboard DB];
+    end
+
+    subgraph Response Path
+      H -- GraphQL Response --> N{Format to<br/>TB JSON};
+      I -- NPL Response --> N;
+      L -- Original JSON Response --> O[Response to UI];
+      N --> O;
+    end
+
+    O --> A;
+```
+
+### Scalability & Maintainability
+
+This approach was explicitly designed for scalability and ease of maintenance.
+
+#### How to Add a New Service/Endpoint
+
+When a new NPL protocol is created (e.g., "Asset Management"), extending the overlay is a simple, localized process:
+
+1. **Create a dedicated GraphQL Service:** A new file (e.g., `asset-graphql.service.ts`) is created to hold the GraphQL queries for reading asset data. This keeps logic for each domain separate.
+2. **Update the Central Router (`request-transformer.service.ts`):**
+   - Add the new URL patterns (e.g., `/api/asset/...`) to the read/write regular expressions.
+   - Add a new `case` to the `switch` statement to call the new `asset-graphql.service.ts` functions.
+
+No other part of the "plumbing" (Nginx, the interceptor, etc.) needs to be changed.
+
+#### Why This Approach is Easy to Scale
+
+- **Centralized Logic:** All routing rules are in one place.
+- **Predictable Pattern:** The process of adding a new endpoint is identical every time.
+- **Low Cognitive Load:** A developer only needs to know the legacy API endpoint and the new NPL/GraphQL equivalent, not the implementation details of the legacy system.
+
+This predictable, pattern-based nature makes it an ideal task for automation, code generation, or an AI assistant to perform quickly and reliably. The initial investment in the overlay infrastructure makes all future modernization work highly efficient.
+
 ## NPL as Authorization Gateway
 
 ### Security Requirement
@@ -99,621 +208,187 @@ Issues:
 └─────────────────────────────┬───────────────────────────────┘
                               │
                               ▼
-         ┌─────────────────────────────────────────────────────┐
-         │           NPL Authorization Gateway                 │
-         │  • Check device access permissions                 │
-         │  • Generate temporary access tokens                │
-         │  • Audit all access attempts                       │
-         │  • Route to appropriate backend                    │
-         └─────────────────┬───────────────┬───────────────────┘
-                           │               │
-                           ▼               ▼
-         ┌─────────────────┐       ┌─────────────────┐
-         │   NPL Stack     │       │ ThingsBoard     │
-         │                 │       │  (Data Only)    │
-         │ • Device CRUD   │       │                 │
-         │ • Business      │       │ • Telemetry     │
-         │   Rules         │       │ • Transport     │
-         │ • Authorization │       │ • WebSockets    │
-         │ • Audit Logs    │       │   (Authorized)  │
-         └─────────────────┘       └─────────────────┘
-
-Deliverables:
-✓ NPL TelemetryAuthorization protocol
-✓ Authorization Gateway service
-✓ Enhanced frontend interceptor
-✓ Temporary token generation
-✓ All telemetry requests go through NPL
-```
-
-### Phase 2: Enhanced Security & Monitoring (Weeks 5-8)
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Frontend (Angular)                       │
-├─────────────────────────────────────────────────────────────┤
-│  Security-Enhanced NPL Interceptor                          │
-│  • Token refresh logic                                      │
-│  • Session management                                       │
-│  • Security headers                                         │
-└─────────────────────────────┬───────────────────────────────┘
-                              │
-                              ▼
-         ┌─────────────────────────────────────────────────────┐
-         │      Enhanced NPL Authorization Gateway             │
-         │  • Fine-grained permissions                        │
-         │  • Rate limiting                                   │
-         │  • Data filtering by user role                     │
-         │  • Real-time security monitoring                   │
-         │  • WebSocket authorization                         │
-         └─────────────────┬───────────────┬───────────────────┘
-                           │               │
-                           ▼               ▼
-         ┌─────────────────┐       ┌─────────────────┐
-         │   NPL Stack     │       │ ThingsBoard     │
-         │                 │       │                 │
-         │ • Advanced      │       │ • Telemetry     │
-         │   Permissions   │       │ • Transport     │
-         │ • Data          │       │ • Processing    │
-         │   Filtering     │       │ • Storage Only  │
-         │ • Audit Trail   │       │                 │
-         └─────────────────┘       └─────────────────┘
-
-Deliverables:
-✓ Advanced permission models in NPL
-✓ Data filtering based on user roles
-✓ WebSocket authorization
-✓ Rate limiting and monitoring
-✓ Security audit dashboard
-```
-
-### Phase 3: Keycloak Integration (Weeks 9-12)
-```
                     ┌─────────────────┐
-                    │    Keycloak     │
-                    │  • JWT Tokens   │
-                    │  • Role Mgmt    │
-                    │  • SSO          │
+                    │ NPL Auth Gateway│
+                    │ • Validate user │
+                    │ • Check device  │
+                    │ • Generate token│
                     └─────────┬───────┘
                               │
-┌─────────────────────────────▼───────────────────────────────┐
+                    ┌─────────▼───────┐
+                    │ ThingsBoard     │
+                    │ • Telemetry     │
+                    │ • Transport     │
+                    │ • Auth (NPL)    │
+                    └─────────────────┘
+
+Benefits:
+- All data access controlled by NPL
+- Centralized audit trail
+- Consistent authorization model
+```
+
+### Phase 2: Keycloak Integration (Next 3-6 months)
+```
+┌─────────────────────────────────────────────────────────────┐
 │                    Frontend (Angular)                       │
 ├─────────────────────────────────────────────────────────────┤
-│  Keycloak + NPL Interceptor                                 │
-│  • JWT validation                                           │
-│  • Role-based routing                                       │
+│  Keycloak Authentication + NPL Authorization                │
 └─────────────────────────────┬───────────────────────────────┘
                               │
-                              ▼
-         ┌─────────────────────────────────────────────────────┐
-         │    Keycloak-NPL Authorization Gateway               │
-         │  • JWT validation                                  │
-         │  • Keycloak role → NPL party mapping              │
-         │  • Multi-tenant support                           │
-         │  • External identity provider integration          │
-         └─────────────────┬───────────────┬───────────────────┘
-                           │               │
-                           ▼               ▼
-         ┌─────────────────┐       ┌─────────────────┐
-         │   NPL Stack     │       │ ThingsBoard     │
-         │                 │       │                 │
-         │ • External      │       │ • Telemetry     │
-         │   Auth          │       │ • Transport     │
-         │ • Role          │       │ • Processing    │
-         │   Mapping       │       │ • Storage Only  │
-         │ • Multi-tenant  │       │                 │
-         └─────────────────┘       └─────────────────┘
-
-Deliverables:
-✓ Keycloak integration
-✓ JWT validation in NPL
-✓ Role mapping service
-✓ Multi-tenant support
-✓ Migration from ThingsBoard auth
-```
-
-### Phase 4: Complete Migration (Weeks 13-16)
-```
-                    ┌─────────────────┐
-                    │    Keycloak     │
-                    │  • All Auth     │
-                    │  • SSO/SAML     │
-                    │  • External IDP │
+                    ┌─────────▼───────┐
+                    │ Keycloak        │
+                    │ • User Auth     │
+                    │ • Role Mapping  │
                     └─────────┬───────┘
                               │
-┌─────────────────────────────▼───────────────────────────────┐
+                    ┌─────────▼───────┐
+                    │ NPL Auth Gateway│
+                    │ • Validate JWT  │
+                    │ • Check device  │
+                    │ • Generate token│
+                    └─────────┬───────┘
+                              │
+                    ┌─────────▼───────┐
+                    │ ThingsBoard     │
+                    │ • Telemetry     │
+                    │ • Transport     │
+                    │ • Auth (NPL)    │
+                    └─────────────────┘
+
+Benefits:
+- External identity provider
+- Enterprise SSO integration
+- Advanced role management
+```
+
+### Phase 3: Complete Migration (Next 6-12 months)
+```
+┌─────────────────────────────────────────────────────────────┐
 │                    Frontend (Angular)                       │
 ├─────────────────────────────────────────────────────────────┤
-│  Pure NPL Integration                                        │
-│  • No ThingsBoard auth dependencies                         │
-│  • Clean separation of concerns                             │
+│  NPL-Only Architecture                                     │
 └─────────────────────────────┬───────────────────────────────┘
                               │
-                              ▼
-         ┌─────────────────────────────────────────────────────┐
-         │         Complete NPL Authorization                  │
-         │  • Zero trust architecture                         │
-         │  • Complete audit trail                           │
-         │  • Advanced business rules                         │
-         │  • Real-time permission updates                   │
-         └─────────────────┬───────────────┬───────────────────┘
-                           │               │
-                           ▼               ▼
-         ┌─────────────────┐       ┌─────────────────┐
-         │   NPL Stack     │       │ ThingsBoard     │
-         │                 │       │                 │
-         │ • Complete      │       │ • Pure Data     │
-         │   Business      │       │   Layer         │
-         │   Logic         │       │ • Transport     │
-         │ • All Auth      │       │ • Storage       │
-         │ • Audit         │       │ • Processing    │
-         └─────────────────┘       └─────────────────┘
+                    ┌─────────▼───────┐
+                    │ NPL Stack       │
+                    │ • All Business  │
+                    │   Logic         │
+                    │ • Authorization │
+                    │ • GraphQL API   │
+                    └─────────┬───────┘
+                              │
+                    ┌─────────▼───────┐
+                    │ ThingsBoard     │
+                    │ • Telemetry     │
+                    │ • Transport     │
+                    │ • Time-series   │
+                    └─────────────────┘
 
-Target State Achieved:
-✓ NPL is the single source of truth for authorization
-✓ ThingsBoard is pure data/transport layer
-✓ Complete audit trail
-✓ Zero trust security model
-✓ Keycloak handles all authentication
+Benefits:
+- Single source of truth
+- Complete audit trail
+- Optimized for each domain
 ```
 
-## Detailed Implementation Steps
-
-### Phase 1: NPL Authorization Gateway (Weeks 1-4)
-
-#### Week 1: NPL Protocol Development
-```npl
-// File: npl-modernization/api/src/main/npl-1.0.0/telemetry/TelemetryAuthorization.npl
-protocol[sys_admin, tenant_admin, customer_user] TelemetryAuthorization() {
-  
-  permission[sys_admin | tenant_admin | customer_user] canAccessDevice(
-    deviceId: Text
-  ) returns Boolean {
-    // Implementation details in previous sections
-  };
-  
-  permission[sys_admin | tenant_admin | customer_user] generateTelemetryToken(
-    deviceId: Text,
-    duration: Number
-  ) returns Text {
-    // Generate JWT with device access permissions
-  };
-  
-  permission[sys_admin | tenant_admin | customer_user] validateTelemetryAccess(
-    deviceId: Text,
-    accessType: Text
-  ) returns Boolean {
-    // Validate specific access types (read, subscribe, etc.)
-  };
-}
-```
-
-#### Week 2: Authorization Gateway Service
-```typescript
-// File: npl-modernization/sync-service/src/services/AuthorizationGateway.ts
-@Injectable()
-export class NPLAuthorizationGateway {
-  
-  async proxyTelemetryRequest(
-    req: HttpRequest<any>,
-    user: User
-  ): Promise<HttpResponse<any>> {
-    
-    const deviceId = this.extractDeviceId(req.url);
-    
-    // 1. Check NPL permissions
-    const hasAccess = await this.nplEngine.call('canAccessDevice', {
-      deviceId
-    }, user.nplPartyInfo);
-    
-    if (!hasAccess) {
-      throw new ForbiddenException('Device access denied');
-    }
-    
-    // 2. Generate access token
-    const token = await this.nplEngine.call('generateTelemetryToken', {
-      deviceId,
-      duration: 15
-    }, user.nplPartyInfo);
-    
-    // 3. Proxy to ThingsBoard with token
-    return await this.proxyToThingsBoard(req, token);
-  }
-}
-```
-
-#### Week 3: Frontend Interceptor Updates
-```typescript
-// File: npl-modernization/frontend-overlay/src/app/npl-modernization/interceptors/
-@Injectable()
-export class NPLAuthorizationInterceptor implements HttpInterceptor {
-  
-  intercept(req: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
-    
-    // Route ALL requests through NPL authorization
-    if (this.isTelemetryRequest(req)) {
-      return this.authGateway.proxyTelemetryRequest(req);
-    }
-    
-    if (this.isDeviceRequest(req)) {
-      return this.transformer.transformToNPL(req);
-    }
-    
-    // All other requests also need authorization check
-    return this.authGateway.authorizeAndProxy(req);
-  }
-  
-  private isTelemetryRequest(req: HttpRequest<any>): boolean {
-    return req.url.includes('/api/plugins/telemetry/') ||
-           req.url.includes('/api/ws/plugins/telemetry');
-  }
-}
-```
-
-#### Week 4: Testing & Integration
-- Unit tests for authorization logic
-- Integration tests for telemetry access
-- End-to-end testing of authorization flow
-- Performance testing of authorization overhead
-
-### Phase 2: Enhanced Security (Weeks 5-8)
-
-#### Advanced Permission Models
-```npl
-protocol[sys_admin, tenant_admin, customer_user] AdvancedTelemetryAuth() {
-  
-  permission[sys_admin | tenant_admin | customer_user] canAccessTelemetryKeys(
-    deviceId: Text,
-    keys: List<Text>
-  ) returns List<Text> {
-    // Return only the keys user is allowed to see
-    var allowedKeys = listOf<Text>();
-    
-    if (activeParty() == sys_admin) {
-      return keys; // Sys admin sees all
-    };
-    
-    for (key in keys) {
-      if (isKeyAllowedForUser(deviceId, key)) {
-        allowedKeys = allowedKeys.with(key);
-      };
-    };
-    
-    return allowedKeys;
-  };
-  
-  permission[sys_admin | tenant_admin | customer_user] getDataFilter(
-    deviceId: Text
-  ) returns Optional<Text> {
-    // Return SQL-like filter for data access
-    if (activeParty() == customer_user) {
-      return optionalOf("timestamp > now() - interval '24 hours'");
-    };
-    
-    return optionalOf(); // No filter for admins
-  };
-}
-```
-
-### Phase 3: Keycloak Integration (Weeks 9-12)
-
-#### Keycloak Service Integration
-```typescript
-@Injectable()
-export class KeycloakNPLAuthService {
-  
-  async validateAndMapUser(keycloakJWT: string): Promise<NPLUserContext> {
-    // 1. Validate JWT with Keycloak
-    const claims = await this.keycloak.validateToken(keycloakJWT);
-    
-    // 2. Map Keycloak roles to NPL parties
-    const nplParty = this.mapRolesToNPLParty(claims.realm_access.roles);
-    
-    // 3. Extract tenant/customer info
-    const tenantId = claims.tenant_id || 'default';
-    const customerId = claims.customer_id;
-    
-    return {
-      party: nplParty,
-      tenantId,
-      customerId,
-      userId: claims.sub,
-      email: claims.email
-    };
-  }
-}
-```
-
-### Phase 4: Complete Migration (Weeks 13-16)
-
-#### Remove ThingsBoard Auth Dependencies
-```typescript
-// Remove all ThingsBoard authentication code
-// Update all services to use NPL authorization only
-// Migrate existing users to Keycloak
-// Update documentation and deployment scripts
-```
-
-## Migration Checklist
-
-### Phase 1 Checklist
-- [ ] NPL TelemetryAuthorization protocol implemented
-- [ ] Authorization Gateway service created
-- [ ] Frontend interceptor updated
-- [ ] All telemetry requests go through NPL
-- [ ] Temporary token generation working
-- [ ] WebSocket authorization implemented
-- [ ] Integration tests passing
-- [ ] Performance impact assessed
-
-### Phase 2 Checklist
-- [ ] Fine-grained permission models
-- [ ] Data filtering by user role
-- [ ] Rate limiting implemented
-- [ ] Security monitoring dashboard
-- [ ] Audit trail complete
-- [ ] WebSocket security enhanced
-- [ ] Load testing completed
-
-### Phase 3 Checklist
-- [ ] Keycloak server deployed
-- [ ] JWT validation implemented
-- [ ] Role mapping service created
-- [ ] Multi-tenant support added
-- [ ] User migration plan executed
-- [ ] SSO integration tested
-- [ ] External IDP connections tested
-
-### Phase 4 Checklist
-- [ ] ThingsBoard auth completely removed
-- [ ] All users migrated to Keycloak
-- [ ] Zero trust architecture verified
-- [ ] Complete audit trail operational
-- [ ] Documentation updated
-- [ ] Training completed
-- [ ] Production deployment successful
-
-## Risk Mitigation
-
-### Technical Risks
-1. **Performance Impact**: Authorization adds latency
-   - Mitigation: Token caching, parallel processing
-   - Monitoring: Response time metrics
-
-2. **Single Point of Failure**: NPL becomes critical path
-   - Mitigation: NPL clustering, fallback mechanisms
-   - Monitoring: NPL availability metrics
-
-3. **Migration Complexity**: Multiple systems involved
-   - Mitigation: Gradual rollout, feature flags
-   - Monitoring: Error rates during migration
-
-### Business Risks
-1. **User Disruption**: Authentication changes affect users
-   - Mitigation: Gradual migration, user training
-   - Communication: Clear migration timeline
-
-2. **Security Gaps**: Temporary vulnerabilities during migration
-   - Mitigation: Security reviews at each phase
-   - Testing: Penetration testing
-
-This comprehensive transition plan ensures a smooth migration from the current state to a fully secure, NPL-controlled architecture while maintaining system availability and user experience.
-
-## Updated Hybrid Architecture
-
+### Phase 4: Future State (12+ months)
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                        Frontend (Angular)                   │
+│                    Frontend (Angular)                       │
 ├─────────────────────────────────────────────────────────────┤
-│  NPL Overlay Interceptor                                    │
-│  ALL requests → NPL Authorization Gateway                   │
-└─────────────────────────────────┬───────────────────────────┘
-                                  │
-                                  ▼
-┌─────────────────────────────────────────────────────────────┐
-│                NPL Authorization Gateway                     │
-│  ┌─────────────────────────────────────────────────────────┐│
-│  │           NPL Authorization Service                     ││
-│  │  • Validate user permissions                           ││
-│  │  • Check device access rights                          ││
-│  │  • Generate access tokens                              ││
-│  │  • Audit all access attempts                           ││
-│  └─────────────────────────────────────────────────────────┘│
-└─────────────────┬───────────────────────────┬───────────────┘
-                  │                           │
-                  ▼                           ▼
-┌─────────────────────────────────┐ ┌─────────────────────────────────┐
-│           NPL Stack             │ │       ThingsBoard Stack         │
-│                                 │ │    (Data Storage Only)          │
-│ ┌─────────────────────────────┐ │ │ ┌─────────────────────────────┐ │
-│ │        NPL Engine           │ │ │ │     Transport Layer         │ │
-│ │  • Device Management        │ │ │ │  • MQTT Broker              │ │
-│ │  • Business Rules           │ │ │ │  • CoAP Server              │ │
-│ │  • Permissions              │ │ │ │  • HTTP Transport           │ │
-│ │  • Audit Logs              │ │ │ │  • LwM2M Server             │ │
-│ └─────────────────────────────┘ │ │ └─────────────────────────────┘ │
-│                                 │ │                                 │
-│ ┌─────────────────────────────┐ │ │ ┌─────────────────────────────┐ │
-│ │      NPL Read Model         │ │ │ │     Rule Engine             │ │
-│ │  • GraphQL API             │ │ │ │  • Telemetry Processing     │ │
-│ │  • Device Queries           │ │ │ │  • Alarm Generation         │ │
-│ │  • Metadata Access          │ │ │ │  • Data Transformation      │ │
-│ └─────────────────────────────┘ │ │ └─────────────────────────────┘ │
-│                                 │ │                                 │
-│            AMQP/RabbitMQ        │ │ ┌─────────────────────────────┐ │
-│         (Event Bus)             │ │ │    Time-Series Storage      │ │
-│                                 │ │ │  • PostgreSQL + TimescaleDB │ │
-│                                 │ │ │  • ts_kv tables             │ │
-│                                 │ │ │  • WebSocket endpoints      │ │
-│                                 │ │ └─────────────────────────────┘ │
-└─────────────────┬───────────────┘ └─────────────────┬───────────────┘
-                  │                                   │
-                  └──────────── Event Bridge ────────┘
-                        (RabbitMQ + Sync Service)
+│  Modern IoT Platform                                        │
+└─────────────────────────────┬───────────────────────────────┘
+                              │
+                    ┌─────────▼───────┐
+                    │ NPL Platform    │
+                    │ • All Business  │
+                    │   Logic         │
+                    │ • Authorization │
+                    │ • GraphQL API   │
+                    └─────────┬───────┘
+                              │
+                    ┌─────────▼───────┐
+                    │ Specialized     │
+                    │ Services        │
+                    │ • Time-series   │
+                    │ • Transport     │
+                    │ • Analytics     │
+                    └─────────────────┘
+
+Benefits:
+- Domain-optimized services
+- Scalable microservices
+- Modern development practices
 ```
 
-## Authorization Implementation
+## Core Principles
 
-### NPL Authorization Protocol
+### 1. Incremental Modernization
+- **Approach**: Module-by-module replacement
+- **Strategy**: Start with Device Management, expand to other modules
+- **Benefit**: Minimal disruption to existing systems
 
+### 2. Event-Driven Architecture
+- **Approach**: Asynchronous event processing
+- **Strategy**: NPL notifications for business events, event streams for monitoring
+- **Benefit**: Scalable, decoupled, real-time processing
+
+### 3. Dual Write Pattern
+- **Approach**: NPL as source of truth, sync to ThingsBoard
+- **Strategy**: Keep both systems in sync until full migration
+- **Benefit**: Safe transition, rollback capability
+
+### 4. Security-First Design
+- **Approach**: JWT authentication, data sanitization
+- **Strategy**: Remove sensitive data before sync
+- **Benefit**: Secure, compliant, privacy-protected
+
+## Implementation Status
+
+### ✅ **Completed Components**
+
+| Component | Status | Details |
+|-----------|--------|---------|
+| **NPL Protocol Deployment** | ✅ **SUCCESS** | DeviceManagement protocol deployed |
+| **Event Stream Authorization** | ✅ **SUCCESS** | JWT authentication working |
+| **RabbitMQ Integration** | ✅ **SUCCESS** | All queues operational |
+| **Sync Service** | ✅ **SUCCESS** | Service running and healthy |
+| **ThingsBoard Integration** | ✅ **SUCCESS** | Connected and ready |
+| **Docker Integration** | ✅ **SUCCESS** | All services containerized |
+| **HTTP Interceptor** | ✅ **SUCCESS** | Request routing operational |
+| **GraphQL Read Model** | ✅ **SUCCESS** | Auto-generated schema working |
+
+## Technical Implementation
+
+### 1. NPL Protocol Design
+
+**DeviceManagement Protocol**:
 ```npl
-protocol[sys_admin, tenant_admin, customer_user] TelemetryAuthorization() {
-  
-  /**
-   * Check if user can access device telemetry
-   */
-  permission[sys_admin | tenant_admin | customer_user] canAccessDeviceTelemetry(
-    deviceId: Text,
-    telemetryType: Text
-  ) returns Boolean {
+@api
+protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
+    // Device CRUD operations
+    permission[sys_admin | tenant_admin] saveDevice(device: Device) returns Device;
+    permission[sys_admin | tenant_admin] deleteDevice(id: Text);
+    permission[sys_admin | tenant_admin] assignDeviceToCustomer(deviceId: Text, customerId: Text);
+    permission[sys_admin | tenant_admin] unassignDeviceFromCustomer(deviceId: Text);
     
-    // Get device from NPL
-    var device = getDevice(deviceId);
-    require(device.isPresent(), "Device not found");
-    
-    // Check permissions based on user role
-    if (activeParty() == sys_admin) {
-      return true; // Sys admin can access all
-    };
-    
-    if (activeParty() == tenant_admin) {
-      return device.get().tenantId == getCurrentTenantId();
-    };
-    
-    if (activeParty() == customer_user) {
-      return device.get().customerId == getCurrentCustomerId();
-    };
-    
-    return false;
-  };
-  
-  /**
-   * Generate temporary access token for telemetry
-   */
-  permission[sys_admin | tenant_admin | customer_user] generateTelemetryToken(
-    deviceId: Text,
-    duration: Number
-  ) returns Text {
-    
-    require(canAccessDeviceTelemetry(deviceId, "read"), "Access denied");
-    
-    // Generate JWT token valid for specified duration
-    var token = generateJWT(mapOf(
-      Pair("deviceId", deviceId),
-      Pair("userId", getCurrentUserId()),
-      Pair("exp", now().plus(minutes(duration)))
-    ));
-    
-    // Audit the access
-    notify TelemetryAccessGranted(deviceId, getCurrentUserId(), now());
-    
-    return token;
-  };
+    // Notifications for business events
+    notify deviceSaved(savedDevice);
+    notify deviceDeleted(deviceId);
+    notify deviceAssigned(deviceId, customerId);
+    notify deviceUnassigned(deviceId);
 }
 ```
 
-### Authorization Gateway Service
+**Key Features**:
+- ✅ Role-based permissions
+- ✅ Comprehensive device data model
+- ✅ NPL notifications for all business actions
+- ✅ Secure data handling
+
+### 2. Event Stream Authorization
 
 ```typescript
-@Injectable()
-export class NPLAuthorizationGateway {
-  
-  constructor(
-    private nplEngine: NplEngineService,
-    private thingsboardClient: ThingsBoardClient
-  ) {}
-  
-  /**
-   * Proxy telemetry request through NPL authorization
-   */
-  async getTelemetryData(
-    userId: string, 
-    deviceId: string, 
-    telemetryRequest: TelemetryRequest
-  ): Promise<TelemetryResponse> {
-    
-    // 1. Check authorization via NPL
-    const canAccess = await this.nplEngine.call('canAccessDeviceTelemetry', {
-      deviceId,
-      telemetryType: 'read'
-    });
-    
-    if (!canAccess) {
-      throw new ForbiddenException('Access denied to device telemetry');
-    }
-    
-    // 2. Generate temporary access token
-    const accessToken = await this.nplEngine.call('generateTelemetryToken', {
-      deviceId,
-      duration: 15 // 15 minutes
-    });
-    
-    // 3. Forward to ThingsBoard with authorization proof
-    const telemetryData = await this.thingsboardClient.getTelemetry({
-      deviceId,
-      ...telemetryRequest,
-      accessToken // Include NPL-generated token
-    });
-    
-    // 4. Optional: Filter data based on fine-grained permissions
-    return this.filterTelemetryByPermissions(userId, telemetryData);
-  }
-  
-  /**
-   * Proxy WebSocket connections through NPL authorization
-   */
-  async authorizeWebSocketConnection(
-    userId: string,
-    deviceId: string
-  ): Promise<string> {
-    
-    const canAccess = await this.nplEngine.call('canAccessDeviceTelemetry', {
-      deviceId,
-      telemetryType: 'subscribe'
-    });
-    
-    if (!canAccess) {
-      throw new ForbiddenException('WebSocket access denied');
-    }
-    
-    // Generate long-lived token for WebSocket
-    return await this.nplEngine.call('generateTelemetryToken', {
-      deviceId,
-      duration: 60 // 1 hour for WebSocket
-    });
-  }
-}
-```
-
-## Migration Phases
-
-### Phase 1: NPL Authorization Layer (Current → Intermediary)
-
-```typescript
-// Frontend interceptor update
-@Injectable()
-export class NPLAuthorizationInterceptor implements HttpInterceptor {
-  
-  intercept(req: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
-    
-    // ALL requests go through NPL first
-    if (this.isTelemetryRequest(req)) {
-      return this.authGateway.proxyTelemetryRequest(req);
-    }
-    
-    if (this.isDeviceRequest(req)) {
-      return this.transformer.transformToNPL(req);
-    }
-    
-    // Other requests still need authorization check
-    return this.authGateway.authorizeAndProxy(req);
-  }
-}
-```
-
-### Phase 2: Keycloak Integration
-
-```typescript
-// Keycloak + NPL authorization
 @Injectable()
 export class KeycloakNPLAuthService {
   
