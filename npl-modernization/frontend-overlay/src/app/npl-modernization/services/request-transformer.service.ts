@@ -21,7 +21,7 @@ export class RequestTransformerService {
   ) {}
 
   /**
-   * Check if this is a device-related read operation that should go to GraphQL
+   * Check if this is a read operation that should go to GraphQL
    */
   isReadOperation(req: HttpRequest<any>): boolean {
     const url = req.url;
@@ -29,32 +29,25 @@ export class RequestTransformerService {
 
     if (method !== 'GET') return false;
 
-    // List of device read endpoints that should be routed to GraphQL
+    // List of read endpoints that should be routed to GraphQL
     const readEndpoints = [
-      // Tenant device queries - these should come FIRST to avoid conflicts
-      /^\/api\/tenant\/devices$/,                     // GET /api/tenant/devices
-      /^\/api\/tenant\/deviceInfos$/,                 // GET /api/tenant/deviceInfos
+      // Tenant management queries (READ operations)
+      /^\/api\/tenant\/([^\/]+)$/,                    // GET /api/tenant/{id}
+      /^\/api\/tenant\/info\/([^\/]+)$/,              // GET /api/tenant/info/{id}
+      /^\/api\/tenants$/,                             // GET /api/tenants (with params)
+      /^\/api\/tenantInfos$/,                         // GET /api/tenantInfos (with params)
       
-      // Customer device queries - these should come BEFORE device patterns
-      /^\/api\/customer\/([^\/]+)\/devices$/,         // GET /api/customer/{id}/devices
-      /^\/api\/customer\/([^\/]+)\/deviceInfos$/,     // GET /api/customer/{id}/deviceInfos
-      
-      // Device queries and searches - these should come BEFORE specific device patterns
+      // Device queries (READ operations)
       /^\/api\/devices$/,                             // GET /api/devices (with params)
       /^\/api\/device\/types$/,                       // GET /api/device/types
-      
-      // Device counts
-      /^\/api\/devices\/count\/([^\/]+)\/([^\/]+)$/,  // GET /api/devices/count/{type}/{profileId}
-      
-      // Enhanced features - Device limits (read operation)
-      /^\/api\/device\/limits$/,                      // GET /api/device/limits
-      
-      // Basic device queries - these should come LAST to avoid conflicts
       /^\/api\/device\/([^\/]+)$/,                    // GET /api/device/{id}
       /^\/api\/device\/info\/([^\/]+)$/,              // GET /api/device/info/{id}
-      
-      // Device credentials
       /^\/api\/device\/([^\/]+)\/credentials$/,       // GET /api/device/{id}/credentials
+      /^\/api\/device\/limits$/,                      // GET /api/device/limits
+      
+      // Customer queries (READ operations)
+      /^\/api\/customer\/([^\/]+)\/devices$/,         // GET /api/customer/{id}/devices
+      /^\/api\/customer\/([^\/]+)\/deviceInfos$/,     // GET /api/customer/{id}/deviceInfos
       
       // Telemetry endpoints - these should fall back to ThingsBoard since NPL doesn't have telemetry yet
       /^\/api\/plugins\/telemetry\/DEVICE\/([^\/]+)\/values\/timeseries$/,  // GET telemetry timeseries
@@ -65,7 +58,7 @@ export class RequestTransformerService {
   }
 
   /**
-   * Check if this is a device-related write operation that should go to NPL
+   * Check if this is a write operation that should go to NPL
    */
   isWriteOperation(req: HttpRequest<any>): boolean {
     const url = req.url;
@@ -73,28 +66,26 @@ export class RequestTransformerService {
 
     if (method === 'GET') return false;
 
-    // List of device write endpoints that should be routed to NPL
+    // List of write endpoints that should be routed to NPL
     const writeEndpoints = [
-      // Device CRUD
+      // Tenant management operations (WRITE operations only)
+      { pattern: /^\/api\/tenant$/, methods: ['POST', 'PUT'] },                         // Create/Update tenant
+      { pattern: /^\/api\/tenant\/([^\/]+)$/, methods: ['DELETE'] },                    // Delete tenant
+      { pattern: /^\/api\/tenants\/bulk$/, methods: ['POST'] },                         // Bulk import tenants
+      { pattern: /^\/api\/tenants\/bulk\/delete$/, methods: ['POST'] },                 // Bulk delete tenants
+      
+      // Device operations (WRITE operations only)
       { pattern: /^\/api\/device$/, methods: ['POST', 'PUT'] },                           // Create/Update device
       { pattern: /^\/api\/device\/([^\/]+)$/, methods: ['DELETE'] },                     // Delete device
-      
-      // Device-Customer assignment
-      { pattern: /^\/api\/customer\/([^\/]+)\/device\/([^\/]+)$/, methods: ['POST'] },   // Assign to customer
-      { pattern: /^\/api\/customer\/device\/([^\/]+)$/, methods: ['DELETE'] },           // Unassign from customer
-      
-      // Device credentials
       { pattern: /^\/api\/device\/credentials$/, methods: ['POST'] },                    // Save credentials
-      
-      // Device claiming
-      { pattern: /^\/api\/customer\/device\/([^\/]+)\/claim$/, methods: ['POST', 'DELETE'] }, // Claim/Reclaim
-      
-      // Enhanced features - Bulk operations
       { pattern: /^\/api\/devices\/bulk$/, methods: ['POST'] },                          // Bulk create devices
       { pattern: /^\/api\/devices\/bulk\/import$/, methods: ['POST'] },                 // Bulk import devices
-      
-      // Enhanced features - Device limits management
       { pattern: /^\/api\/device\/limits$/, methods: ['PUT'] },                          // Update device limits
+      
+      // Device-Customer assignment (WRITE operations)
+      { pattern: /^\/api\/customer\/([^\/]+)\/device\/([^\/]+)$/, methods: ['POST'] },   // Assign to customer
+      { pattern: /^\/api\/customer\/device\/([^\/]+)$/, methods: ['DELETE'] },           // Unassign from customer
+      { pattern: /^\/api\/customer\/device\/([^\/]+)\/claim$/, methods: ['POST', 'DELETE'] }, // Claim/Reclaim
     ];
 
     return writeEndpoints.some(endpoint => 

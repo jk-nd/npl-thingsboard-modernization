@@ -1,0 +1,312 @@
+package tenantManagement
+
+/**
+ * Struct to represent tenant limits
+ * @param maxUsers Maximum number of users allowed
+ * @param maxDevices Maximum number of devices allowed
+ * @param maxAssets Maximum number of assets allowed
+ * @param maxCustomers Maximum number of customers allowed
+ */
+struct TenantLimits {
+    maxUsers: Number,
+    maxDevices: Number,
+    maxAssets: Number,
+    maxCustomers: Number
+};
+
+/**
+ * Struct to represent tenant data for creation/update
+ * @param name Tenant name
+ * @param title Tenant title
+ * @param region Tenant region
+ * @param country Tenant country
+ * @param stateName Tenant state
+ * @param city Tenant city
+ * @param address Tenant address
+ * @param address2 Tenant address line 2
+ * @param zip Tenant zip code
+ * @param phone Tenant phone number
+ * @param email Tenant email
+ * @param limits Tenant limits
+ */
+struct TenantData {
+    name: Text,
+    title: Text,
+    region: Text,
+    country: Text,
+    stateName: Text,
+    city: Text,
+    address: Text,
+    address2: Text,
+    zip: Text,
+    phone: Text,
+    email: Text,
+    limits: TenantLimits
+};
+
+/**
+ * Struct to represent a tenant entity
+ * @param id Tenant ID
+ * @param name Tenant name
+ * @param title Tenant title
+ * @param region Tenant region
+ * @param country Tenant country
+ * @param stateName Tenant state
+ * @param city Tenant city
+ * @param address Tenant address
+ * @param address2 Tenant address line 2
+ * @param zip Tenant zip code
+ * @param phone Tenant phone number
+ * @param email Tenant email
+ * @param limits Tenant limits
+ * @param createdTime Creation timestamp
+ * @param additionalInfo Additional tenant information
+ */
+struct Tenant {
+    id: Text,
+    name: Text,
+    title: Text,
+    region: Text,
+    country: Text,
+    stateName: Text,
+    city: Text,
+    address: Text,
+    address2: Text,
+    zip: Text,
+    phone: Text,
+    email: Text,
+    limits: TenantLimits,
+    createdTime: DateTime,
+    additionalInfo: Text
+};
+
+/**
+ * Struct to represent tenant info (extends Tenant with profile info)
+ * @param tenant The base tenant information
+ * @param tenantProfileName The name of the tenant profile
+ */
+struct TenantInfo {
+    tenant: Tenant,
+    tenantProfileName: Text
+};
+
+/**
+ * Struct to represent bulk import result
+ * @param successCount Number of successfully imported tenants
+ * @param failureCount Number of failed imports
+ * @param errors List of error messages
+ */
+struct BulkImportResult {
+    successCount: Number,
+    failureCount: Number,
+    errors: List<Text>
+};
+
+/**
+ * Notifications
+ */
+notification tenantCreated(tenant: Tenant) returns Unit;
+notification tenantUpdated(tenant: Tenant) returns Unit;
+notification tenantDeleted(tenant: Tenant) returns Unit;
+notification tenantsBulkImported(importedCount: Number, failedCount: Number) returns Unit;
+notification tenantsBulkDeleted(deletedCount: Number) returns Unit;
+
+/**
+ * Function to validate tenant data using contributor library
+ * @param data The tenant data to validate
+ * @return True if valid, false otherwise
+ */
+function validateTenantData(data: TenantData) -> {
+    return thingsboard.v1.validateTenantData(data);
+};
+
+/**
+ * Function to generate a unique tenant ID using contributor library
+ * @return A unique tenant ID
+ */
+function generateTenantId() -> {
+    return thingsboard.v1.generateTenantId();
+};
+
+/**
+ * Function to check if tenant name already exists using contributor library
+ * @param name The tenant name to check
+ * @param tenantsMap The tenants map to check against
+ * @return True if name exists, false otherwise
+ */
+function tenantNameExists(name: Text, tenantsMap: Map<Text, Tenant>) -> {
+    return thingsboard.v1.tenantNameExists(name, tenantsMap);
+};
+
+/**
+ * Function to create tenant entity using contributor library
+ * @param data Tenant data
+ * @param id Tenant ID
+ * @return Created tenant
+ */
+function createTenantEntity(data: TenantData, id: Text) -> {
+    return thingsboard.v1.createTenantEntity(data, id);
+};
+
+/**
+ * Function to create tenant info using contributor library
+ * @param tenant The tenant
+ * @return Created tenant info
+ */
+function createTenantInfo(tenant: Tenant) -> {
+    return thingsboard.v1.createTenantInfo(tenant);
+};
+
+/**
+ * Function to process bulk import using contributor library
+ * @param tenantDataList List of tenant data
+ * @param tenants Current tenants map
+ * @return Bulk import result
+ */
+function processBulkImport(tenantDataList: List<TenantData>, tenants: Map<Text, Tenant>) -> {
+    return thingsboard.v1.processTenantBulkImport(tenantDataList, tenants);
+};
+
+/**
+ * Main Tenant Management protocol
+ * Handles only WRITE operations - queries go through GraphQL
+ * @param sys_admin System administrator party
+ */
+@api
+protocol[sys_admin] TenantManagement() {
+    
+    // States
+    initial state active;
+    final state deleted;
+    
+    // Data structures
+    private var tenants = mapOf<Text, Tenant>();
+    private var tenantInfos = mapOf<Text, TenantInfo>();
+    
+    /**
+     * Create a new tenant (WRITE operation)
+     * @param data Tenant data for creation
+     * @return The created tenant
+     */
+    @api
+    permission[sys_admin] createTenant(data: TenantData) | active returns Tenant {
+        require(validateTenantData(data), "Invalid tenant data");
+        require(!tenantNameExists(data.name, tenants), "Tenant name already exists");
+        
+        var tenant = createTenantEntity(data, generateTenantId());
+        tenants = tenants.with(tenant.id, tenant);
+        
+        // Create tenant info
+        var tenantInfo = createTenantInfo(tenant);
+        tenantInfos = tenantInfos.with(tenant.id, tenantInfo);
+        
+        notify tenantCreated(tenant);
+        return tenant;
+    };
+    
+    /**
+     * Update an existing tenant (WRITE operation)
+     * @param id Tenant ID to update
+     * @param data Updated tenant data
+     * @return The updated tenant
+     */
+    @api
+    permission[sys_admin] updateTenant(id: Text, data: TenantData) | active returns Tenant {
+        require(tenants.containsKey(id), "Tenant not found");
+        require(validateTenantData(data), "Invalid tenant data");
+        
+        var existingTenant = tenants.getOrFail(id);
+        require(existingTenant.name == data.name || !tenantNameExists(data.name, tenants), "Tenant name already exists");
+        
+        var updatedTenant = createTenantEntity(data, id);
+        updatedTenant = Tenant(
+            id = id,
+            name = data.name,
+            title = data.title,
+            region = data.region,
+            country = data.country,
+            stateName = data.stateName,
+            city = data.city,
+            address = data.address,
+            address2 = data.address2,
+            zip = data.zip,
+            phone = data.phone,
+            email = data.email,
+            limits = data.limits,
+            createdTime = existingTenant.createdTime,
+            additionalInfo = existingTenant.additionalInfo
+        );
+        
+        tenants = tenants.with(id, updatedTenant);
+        
+        // Update tenant info
+        var tenantInfo = createTenantInfo(updatedTenant);
+        tenantInfos = tenantInfos.with(id, tenantInfo);
+        
+        notify tenantUpdated(updatedTenant);
+        return updatedTenant;
+    };
+    
+    /**
+     * Delete a tenant (WRITE operation)
+     * @param id Tenant ID to delete
+     */
+    @api
+    permission[sys_admin] deleteTenant(id: Text) | active {
+        require(tenants.containsKey(id), "Tenant not found");
+        
+        var tenant = tenants.getOrFail(id);
+        tenants = tenants.without(id);
+        tenantInfos = tenantInfos.without(id);
+        
+        notify tenantDeleted(tenant);
+    };
+    
+    /**
+     * Bulk import tenants (WRITE operation)
+     * @param tenantDataList List of tenant data to import
+     * @return Bulk import result
+     */
+    @api
+    permission[sys_admin] bulkImportTenants(tenantDataList: List<TenantData>) | active returns BulkImportResult {
+        var result = processBulkImport(tenantDataList, tenants);
+        
+        // Update local state with successful imports
+        for (tenant in result.importedTenants) {
+            tenants = tenants.with(tenant.id, tenant);
+            var tenantInfo = createTenantInfo(tenant);
+            tenantInfos = tenantInfos.with(tenant.id, tenantInfo);
+            notify tenantCreated(tenant);
+        };
+        
+        notify tenantsBulkImported(result.successCount, result.failureCount);
+        return BulkImportResult(
+            successCount = result.successCount,
+            failureCount = result.failureCount,
+            errors = result.errors
+        );
+    };
+    
+    /**
+     * Bulk delete tenants (WRITE operation)
+     * @param tenantIds List of tenant IDs to delete
+     * @return Number of deleted tenants
+     */
+    @api
+    permission[sys_admin] bulkDeleteTenants(tenantIds: List<Text>) | active returns Number {
+        var deletedCount = 0;
+        
+        for (id in tenantIds) {
+            if (tenants.containsKey(id)) {
+                var tenant = tenants.getOrFail(id);
+                tenants = tenants.without(id);
+                tenantInfos = tenantInfos.without(id);
+                deletedCount = deletedCount + 1;
+                notify tenantDeleted(tenant);
+            };
+        };
+        
+        notify tenantsBulkDeleted(deletedCount);
+        return deletedCount;
+    };
+}; 
