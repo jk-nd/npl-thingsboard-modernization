@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import { describe, test, expect, beforeAll, afterAll, beforeEach } from '@jest/globals';
-import axios, { AxiosInstance } from 'axios';
+import { describe, test, expect, beforeAll, afterAll } from '@jest/globals';
+import axios, { AxiosInstance, AxiosResponse } from 'axios';
 
 interface TestConfig {
   thingsBoardUrl: string;
@@ -433,7 +433,7 @@ class DeviceManagementIntegrationTest {
     console.log('⚡ Testing: Read operation performance...');
     
     // Create test devices
-    const devicePromises = [];
+    const devicePromises: Promise<AxiosResponse<any>>[] = [];
     for (let i = 0; i < 3; i++) {
       const device = {
         name: `perf-device-${i}`,

@@ -8,6 +8,7 @@ import { InMemoryCache } from '@apollo/client/core';
 // Services
 import { NplClientService } from './services/npl-client.service';
 import { DeviceGraphQLService } from './services/device-graphql.service';
+import { DeviceNplService } from './services/device-npl.service';
 import { TenantGraphQLService } from './services/tenant-graphql.service';
 import { TenantNplService } from './services/tenant-npl.service';
 import { RequestTransformerService } from './services/request-transformer.service';
@@ -15,6 +16,7 @@ import { GraphQLConfigService } from './config/apollo.config';
 
 // Interceptors
 import { NplModernizationInterceptor } from './interceptors/npl-modernization.interceptor';
+import { DeviceModernizationInterceptor } from './interceptors/device-modernization.interceptor';
 import { TenantModernizationInterceptor } from './interceptors/tenant-modernization.interceptor';
 
 @NgModule({
@@ -26,11 +28,13 @@ import { TenantModernizationInterceptor } from './interceptors/tenant-modernizat
   providers: [
     NplClientService,
     DeviceGraphQLService,
+    DeviceNplService,
     TenantGraphQLService,
     TenantNplService,
     RequestTransformerService,
     GraphQLConfigService,
     NplModernizationInterceptor,
+    DeviceModernizationInterceptor,
     TenantModernizationInterceptor,
     {
       provide: APOLLO_OPTIONS,

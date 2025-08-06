@@ -1,7 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { NplEngineService } from './npl-engine.service';
-import { ThingsBoardService } from './thingsboard.service';
-import { EventEmitter2 } from '@nestjs/event-emitter';
+import { EventEmitter } from 'events';
 
 export interface TenantData {
   id: string;
@@ -31,16 +28,29 @@ export interface TenantInfo {
   tenantProfileName: string;
 }
 
-@Injectable()
+export interface NplEngineService {
+  getAllTenants(): Promise<TenantData[]>;
+  getTenantCount(): Promise<number>;
+  createTenant(tenant: TenantData): Promise<TenantData>;
+}
+
+export interface ThingsBoardService {
+  getAllTenants(): Promise<any[]>;
+  getTenantCount(): Promise<number>;
+  createTenant(tenant: any): Promise<any>;
+  updateTenant(id: string, tenant: any): Promise<any>;
+  deleteTenant(id: string): Promise<void>;
+}
+
 export class TenantSyncService {
-  private readonly logger = new Logger(TenantSyncService.name);
   private syncInProgress = false;
+  private eventEmitter: EventEmitter;
 
   constructor(
     private readonly nplEngineService: NplEngineService,
-    private readonly thingsBoardService: ThingsBoardService,
-    private readonly eventEmitter: EventEmitter2
+    private readonly thingsBoardService: ThingsBoardService
   ) {
+    this.eventEmitter = new EventEmitter();
     this.setupEventListeners();
   }
 
@@ -75,13 +85,13 @@ export class TenantSyncService {
    */
   async syncTenantToThingsBoard(tenant: TenantData, operation: 'create' | 'update' | 'delete') {
     if (this.syncInProgress) {
-      this.logger.warn('Sync already in progress, skipping');
+      console.warn('Sync already in progress, skipping');
       return;
     }
 
     try {
       this.syncInProgress = true;
-      this.logger.log(`Syncing tenant ${tenant.id} to ThingsBoard (${operation})`);
+      console.log(`Syncing tenant ${tenant.id} to ThingsBoard (${operation})`);
 
       switch (operation) {
         case 'create':
@@ -95,10 +105,9 @@ export class TenantSyncService {
           break;
       }
 
-      this.logger.log(`Successfully synced tenant ${tenant.id} to ThingsBoard`);
+      console.log(`Successfully synced tenant ${tenant.id} to ThingsBoard`);
     } catch (error) {
-      this.logger.error(`Failed to sync tenant ${tenant.id} to ThingsBoard:`, error);
-      // Emit sync failure event for retry mechanism
+      console.error(`Failed to sync tenant ${tenant.id} to ThingsBoard:`, error);
       this.eventEmitter.emit('tenantSyncFailed', { tenant, operation, error });
     } finally {
       this.syncInProgress = false;
@@ -123,7 +132,6 @@ export class TenantSyncService {
       phone: tenant.phone,
       email: tenant.email,
       additionalInfo: tenant.additionalInfo,
-      // Convert NPL limits to ThingsBoard format
       tenantProfileId: this.convertLimitsToProfileId(tenant.limits)
     };
 
@@ -155,7 +163,7 @@ export class TenantSyncService {
   }
 
   /**
-   * Delete tenant in ThingsBoard
+   * Delete tenant from ThingsBoard
    */
   private async deleteTenantInThingsBoard(tenantId: string) {
     await this.thingsBoardService.deleteTenant(tenantId);
@@ -165,22 +173,17 @@ export class TenantSyncService {
    * Handle bulk import sync
    */
   private async handleBulkImportSync(data: { importedCount: number; failedCount: number }) {
-    this.logger.log(`Bulk import completed: ${data.importedCount} imported, ${data.failedCount} failed`);
+    console.log(`Bulk import completed: ${data.importedCount} imported, ${data.failedCount} failed`);
     
-    // Trigger full sync to ensure all imported tenants are in ThingsBoard
-    if (data.importedCount > 0) {
-      await this.syncAllTenantsFromNplToThingsBoard();
-    }
+    // Sync all tenants from NPL to ThingsBoard
+    await this.syncAllTenantsFromNplToThingsBoard();
   }
 
   /**
    * Handle bulk delete sync
    */
   private async handleBulkDeleteSync(data: { deletedCount: number }) {
-    this.logger.log(`Bulk delete completed: ${data.deletedCount} tenants deleted`);
-    
-    // The individual delete events will handle the sync
-    // This is just for logging and monitoring
+    console.log(`Bulk delete completed: ${data.deletedCount} deleted`);
   }
 
   /**
@@ -188,40 +191,30 @@ export class TenantSyncService {
    */
   async syncAllTenantsFromNplToThingsBoard() {
     try {
-      this.logger.log('Starting full tenant sync from NPL to ThingsBoard');
-      
       const nplTenants = await this.nplEngineService.getAllTenants();
       const thingsBoardTenants = await this.thingsBoardService.getAllTenants();
-      
-      // Create maps for efficient lookup
-      const nplTenantMap = new Map(nplTenants.map(t => [t.id, t]));
-      const thingsBoardTenantMap = new Map(thingsBoardTenants.map(t => [t.id, t]));
-      
-      // Find tenants that need to be created in ThingsBoard
+
+      // Create new tenants
       for (const nplTenant of nplTenants) {
-        if (!thingsBoardTenantMap.has(nplTenant.id)) {
+        const existingTenant = thingsBoardTenants.find(tb => tb.id === nplTenant.id);
+        if (!existingTenant) {
           await this.createTenantInThingsBoard(nplTenant);
-        }
-      }
-      
-      // Find tenants that need to be updated in ThingsBoard
-      for (const nplTenant of nplTenants) {
-        const thingsBoardTenant = thingsBoardTenantMap.get(nplTenant.id);
-        if (thingsBoardTenant && this.tenantsDiffer(nplTenant, thingsBoardTenant)) {
+        } else if (this.tenantsDiffer(nplTenant, existingTenant)) {
           await this.updateTenantInThingsBoard(nplTenant);
         }
       }
-      
-      // Find tenants that need to be deleted from ThingsBoard
+
+      // Delete tenants that no longer exist in NPL
       for (const thingsBoardTenant of thingsBoardTenants) {
-        if (!nplTenantMap.has(thingsBoardTenant.id)) {
+        const nplTenant = nplTenants.find(npl => npl.id === thingsBoardTenant.id);
+        if (!nplTenant) {
           await this.deleteTenantInThingsBoard(thingsBoardTenant.id);
         }
       }
-      
-      this.logger.log('Full tenant sync completed');
+
+      console.log('Full sync from NPL to ThingsBoard completed');
     } catch (error) {
-      this.logger.error('Failed to sync all tenants:', error);
+      console.error('Failed to sync all tenants from NPL to ThingsBoard:', error);
     }
   }
 
@@ -230,18 +223,16 @@ export class TenantSyncService {
    */
   async syncAllTenantsFromThingsBoardToNpl() {
     try {
-      this.logger.log('Starting full tenant sync from ThingsBoard to NPL');
-      
       const thingsBoardTenants = await this.thingsBoardService.getAllTenants();
-      
+
       for (const thingsBoardTenant of thingsBoardTenants) {
         const nplTenant = this.convertThingsBoardToNpl(thingsBoardTenant);
         await this.nplEngineService.createTenant(nplTenant);
       }
-      
-      this.logger.log('Full tenant sync from ThingsBoard to NPL completed');
+
+      console.log('Full sync from ThingsBoard to NPL completed');
     } catch (error) {
-      this.logger.error('Failed to sync tenants from ThingsBoard to NPL:', error);
+      console.error('Failed to sync all tenants from ThingsBoard to NPL:', error);
     }
   }
 
@@ -252,16 +243,16 @@ export class TenantSyncService {
     return {
       id: thingsBoardTenant.id,
       name: thingsBoardTenant.name,
-      title: thingsBoardTenant.title || '',
-      region: thingsBoardTenant.region || '',
-      country: thingsBoardTenant.country || '',
-      stateName: thingsBoardTenant.state || '',
-      city: thingsBoardTenant.city || '',
-      address: thingsBoardTenant.address || '',
-      address2: thingsBoardTenant.address2 || '',
-      zip: thingsBoardTenant.zip || '',
-      phone: thingsBoardTenant.phone || '',
-      email: thingsBoardTenant.email || '',
+      title: thingsBoardTenant.title,
+      region: thingsBoardTenant.region,
+      country: thingsBoardTenant.country,
+      stateName: thingsBoardTenant.state,
+      city: thingsBoardTenant.city,
+      address: thingsBoardTenant.address,
+      address2: thingsBoardTenant.address2,
+      zip: thingsBoardTenant.zip,
+      phone: thingsBoardTenant.phone,
+      email: thingsBoardTenant.email,
       limits: this.convertProfileIdToLimits(thingsBoardTenant.tenantProfileId),
       createdTime: thingsBoardTenant.createdTime || new Date().toISOString(),
       additionalInfo: thingsBoardTenant.additionalInfo || '{}'
@@ -272,49 +263,40 @@ export class TenantSyncService {
    * Convert NPL limits to ThingsBoard profile ID
    */
   private convertLimitsToProfileId(limits: any): string {
-    // This is a simplified conversion - in practice, you'd have a mapping
-    // between NPL limits and ThingsBoard tenant profiles
-    const profileMap = {
-      '100-1000-500-50': 'default-profile-id',
-      '200-2000-1000-100': 'premium-profile-id',
-      '500-5000-2500-250': 'enterprise-profile-id'
-    };
-    
-    const key = `${limits.maxUsers}-${limits.maxDevices}-${limits.maxAssets}-${limits.maxCustomers}`;
-    return profileMap[key] || 'default-profile-id';
+    // Simple mapping - in production this would be more sophisticated
+    if (limits.maxUsers >= 200) return 'premium-profile-id';
+    if (limits.maxUsers >= 100) return 'standard-profile-id';
+    return 'default-profile-id';
   }
 
   /**
    * Convert ThingsBoard profile ID to NPL limits
    */
   private convertProfileIdToLimits(profileId: string): any {
-    // This is a simplified conversion - in practice, you'd have a mapping
-    const limitsMap = {
-      'default-profile-id': { maxUsers: 100, maxDevices: 1000, maxAssets: 500, maxCustomers: 50 },
-      'premium-profile-id': { maxUsers: 200, maxDevices: 2000, maxAssets: 1000, maxCustomers: 100 },
-      'enterprise-profile-id': { maxUsers: 500, maxDevices: 5000, maxAssets: 2500, maxCustomers: 250 }
-    };
-    
-    return limitsMap[profileId] || limitsMap['default-profile-id'];
+    // Simple mapping - in production this would be more sophisticated
+    switch (profileId) {
+      case 'premium-profile-id':
+        return { maxUsers: 200, maxDevices: 2000, maxAssets: 1000, maxCustomers: 100 };
+      case 'standard-profile-id':
+        return { maxUsers: 100, maxDevices: 1000, maxAssets: 500, maxCustomers: 50 };
+      default:
+        return { maxUsers: 50, maxDevices: 500, maxAssets: 250, maxCustomers: 25 };
+    }
   }
 
   /**
-   * Check if two tenants differ
+   * Check if tenants differ
    */
   private tenantsDiffer(nplTenant: TenantData, thingsBoardTenant: any): boolean {
-    return (
-      nplTenant.name !== thingsBoardTenant.name ||
-      nplTenant.title !== thingsBoardTenant.title ||
-      nplTenant.region !== thingsBoardTenant.region ||
-      nplTenant.country !== thingsBoardTenant.country ||
-      nplTenant.stateName !== thingsBoardTenant.state ||
-      nplTenant.city !== thingsBoardTenant.city ||
-      nplTenant.address !== thingsBoardTenant.address ||
-      nplTenant.address2 !== thingsBoardTenant.address2 ||
-      nplTenant.zip !== thingsBoardTenant.zip ||
-      nplTenant.phone !== thingsBoardTenant.phone ||
-      nplTenant.email !== thingsBoardTenant.email
-    );
+    return nplTenant.name !== thingsBoardTenant.name ||
+           nplTenant.title !== thingsBoardTenant.title ||
+           nplTenant.region !== thingsBoardTenant.region ||
+           nplTenant.country !== thingsBoardTenant.country ||
+           nplTenant.stateName !== thingsBoardTenant.state ||
+           nplTenant.city !== thingsBoardTenant.city ||
+           nplTenant.address !== thingsBoardTenant.address ||
+           nplTenant.phone !== thingsBoardTenant.phone ||
+           nplTenant.email !== thingsBoardTenant.email;
   }
 
   /**
@@ -324,7 +306,7 @@ export class TenantSyncService {
     try {
       const nplTenantCount = await this.nplEngineService.getTenantCount();
       const thingsBoardTenantCount = await this.thingsBoardService.getTenantCount();
-      
+
       return {
         nplTenantCount,
         thingsBoardTenantCount,
@@ -332,13 +314,13 @@ export class TenantSyncService {
         lastSyncTime: new Date().toISOString()
       };
     } catch (error) {
-      this.logger.error('Failed to get sync status:', error);
+      console.error('Failed to get sync status:', error);
       return {
         nplTenantCount: 0,
         thingsBoardTenantCount: 0,
         syncInProgress: this.syncInProgress,
         lastSyncTime: null,
-        error: error.message
+        error: (error as Error).message
       };
     }
   }
@@ -347,7 +329,19 @@ export class TenantSyncService {
    * Force sync all tenants
    */
   async forceSync() {
-    this.logger.log('Force syncing all tenants');
-    await this.syncAllTenantsFromNplToThingsBoard();
+    try {
+      await this.syncAllTenantsFromNplToThingsBoard();
+      return { success: true, message: 'Sync completed successfully' };
+    } catch (error) {
+      console.error('Force sync failed:', error);
+      return { success: false, error: (error as Error).message };
+    }
+  }
+
+  /**
+   * Get event emitter for external access
+   */
+  getEventEmitter(): EventEmitter {
+    return this.eventEmitter;
   }
 } 

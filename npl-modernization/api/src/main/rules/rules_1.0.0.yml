@@ -11,3 +11,9 @@ deviceManagement.DeviceManagement:
     extract:
       entity:
         - preferred_username
+
+tenantManagement.TenantManagement:
+  sys_admin:
+    extract:
+      entity:
+        - preferred_username

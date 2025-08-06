@@ -112,59 +112,74 @@ notification tenantsBulkImported(importedCount: Number, failedCount: Number) ret
 notification tenantsBulkDeleted(deletedCount: Number) returns Unit;
 
 /**
- * Function to validate tenant data using contributor library
+ * Function to validate tenant data.
  * @param data The tenant data to validate
  * @return True if valid, false otherwise
  */
 function validateTenantData(data: TenantData) -> {
-    return thingsboard.v1.validateTenantData(data);
+    // Corrected validation logic
+    return data.name.length() > 0 && data.title.length() > 0;
 };
 
 /**
- * Function to generate a unique tenant ID using contributor library
+ * Function to generate a unique tenant ID.
  * @return A unique tenant ID
  */
 function generateTenantId() -> {
-    return thingsboard.v1.generateTenantId();
+    return "tenant_" + now().toText();
 };
 
 /**
- * Function to check if tenant name already exists using contributor library
+ * Function to check if tenant name already exists.
  * @param name The tenant name to check
  * @param tenantsMap The tenants map to check against
  * @return True if name exists, false otherwise
  */
 function tenantNameExists(name: Text, tenantsMap: Map<Text, Tenant>) -> {
-    return thingsboard.v1.tenantNameExists(name, tenantsMap);
+    for (tenant in tenantsMap.values()) {
+        if (tenant.name == name) {
+            return true;
+        };
+    };
+    return false;
 };
 
 /**
- * Function to create tenant entity using contributor library
+ * Function to create tenant entity.
  * @param data Tenant data
  * @param id Tenant ID
  * @return Created tenant
  */
 function createTenantEntity(data: TenantData, id: Text) -> {
-    return thingsboard.v1.createTenantEntity(data, id);
+    return Tenant(
+        id = id,
+        name = data.name,
+        title = data.title,
+        region = data.region,
+        country = data.country,
+        stateName = data.stateName,
+        city = data.city,
+        address = data.address,
+        address2 = data.address2,
+        zip = data.zip,
+        phone = data.phone,
+        email = data.email,
+        limits = data.limits,
+        createdTime = now(),
+        additionalInfo = "{}"
+    );
 };
 
 /**
- * Function to create tenant info using contributor library
+ * Function to create tenant info.
  * @param tenant The tenant
  * @return Created tenant info
  */
 function createTenantInfo(tenant: Tenant) -> {
-    return thingsboard.v1.createTenantInfo(tenant);
-};
-
-/**
- * Function to process bulk import using contributor library
- * @param tenantDataList List of tenant data
- * @param tenants Current tenants map
- * @return Bulk import result
- */
-function processBulkImport(tenantDataList: List<TenantData>, tenants: Map<Text, Tenant>) -> {
-    return thingsboard.v1.processTenantBulkImport(tenantDataList, tenants);
+    return TenantInfo(
+        tenant = tenant,
+        tenantProfileName = "default"
+    );
 };
 
 /**
@@ -189,11 +204,11 @@ protocol[sys_admin] TenantManagement() {
      * @return The created tenant
      */
     @api
-    permission[sys_admin] createTenant(data: TenantData) | active returns Tenant {
+    permission[sys_admin] createTenant(data: TenantData) returns Tenant | active {
         require(validateTenantData(data), "Invalid tenant data");
         require(!tenantNameExists(data.name, tenants), "Tenant name already exists");
         
-        var tenant = createTenantEntity(data, generateTenantId());
+        var tenant: Tenant = createTenantEntity(data, generateTenantId());
         tenants = tenants.with(tenant.id, tenant);
         
         // Create tenant info
@@ -211,11 +226,11 @@ protocol[sys_admin] TenantManagement() {
      * @return The updated tenant
      */
     @api
-    permission[sys_admin] updateTenant(id: Text, data: TenantData) | active returns Tenant {
-        require(tenants.containsKey(id), "Tenant not found");
+    permission[sys_admin] updateTenant(id: Text, data: TenantData) returns Tenant | active {
+        require(tenants.getOrNone(id).isPresent(), "Tenant not found");
         require(validateTenantData(data), "Invalid tenant data");
         
-        var existingTenant = tenants.getOrFail(id);
+        var existingTenant = tenants.getOrNone(id).getOrFail();
         require(existingTenant.name == data.name || !tenantNameExists(data.name, tenants), "Tenant name already exists");
         
         var updatedTenant = createTenantEntity(data, id);
@@ -253,9 +268,9 @@ protocol[sys_admin] TenantManagement() {
      */
     @api
     permission[sys_admin] deleteTenant(id: Text) | active {
-        require(tenants.containsKey(id), "Tenant not found");
+        require(tenants.getOrNone(id).isPresent(), "Tenant not found");
         
-        var tenant = tenants.getOrFail(id);
+        var tenant = tenants.getOrNone(id).getOrFail();
         tenants = tenants.without(id);
         tenantInfos = tenantInfos.without(id);
         
@@ -268,22 +283,34 @@ protocol[sys_admin] TenantManagement() {
      * @return Bulk import result
      */
     @api
-    permission[sys_admin] bulkImportTenants(tenantDataList: List<TenantData>) | active returns BulkImportResult {
-        var result = processBulkImport(tenantDataList, tenants);
-        
-        // Update local state with successful imports
-        for (tenant in result.importedTenants) {
-            tenants = tenants.with(tenant.id, tenant);
-            var tenantInfo = createTenantInfo(tenant);
-            tenantInfos = tenantInfos.with(tenant.id, tenantInfo);
-            notify tenantCreated(tenant);
+    permission[sys_admin] bulkImportTenants(tenantDataList: List<TenantData>) returns BulkImportResult | active {
+        var successCount = 0;
+        var failureCount = 0;
+        var errors = listOf<Text>();
+
+        for (data in tenantDataList) {
+            if (validateTenantData(data) && !tenantNameExists(data.name, tenants)) {
+                var id = generateTenantId();
+                var tenant = createTenantEntity(data, id);
+                
+                tenants = tenants.with(tenant.id, tenant);
+                var tenantInfo = createTenantInfo(tenant);
+                tenantInfos = tenantInfos.with(tenant.id, tenantInfo);
+                
+                notify tenantCreated(tenant);
+                successCount = successCount + 1;
+            } else {
+                failureCount = failureCount + 1;
+                errors = errors.with("Invalid or duplicate tenant data: " + data.name);
+            };
         };
         
-        notify tenantsBulkImported(result.successCount, result.failureCount);
+        notify tenantsBulkImported(successCount, failureCount);
+        
         return BulkImportResult(
-            successCount = result.successCount,
-            failureCount = result.failureCount,
-            errors = result.errors
+            successCount = successCount,
+            failureCount = failureCount,
+            errors = errors
         );
     };
     
@@ -293,12 +320,12 @@ protocol[sys_admin] TenantManagement() {
      * @return Number of deleted tenants
      */
     @api
-    permission[sys_admin] bulkDeleteTenants(tenantIds: List<Text>) | active returns Number {
+    permission[sys_admin] bulkDeleteTenants(tenantIds: List<Text>) returns Number | active {
         var deletedCount = 0;
         
         for (id in tenantIds) {
-            if (tenants.containsKey(id)) {
-                var tenant = tenants.getOrFail(id);
+            if (tenants.getOrNone(id).isPresent()) {
+                var tenant = tenants.getOrNone(id).getOrFail();
                 tenants = tenants.without(id);
                 tenantInfos = tenantInfos.without(id);
                 deletedCount = deletedCount + 1;

@@ -8,6 +8,8 @@
 import { AmqpConnectionManager } from './amqp/connection';
 import { AmqpConfig, QueueConfig } from './types';
 import { ThingsBoardClient, ThingsBoardConfig } from './thingsboard/client';
+import { TenantSyncService, NplEngineService, ThingsBoardService, TenantData } from './services/tenant-sync.service';
+import { DeviceSyncService, DeviceData } from './services/device-sync.service';
 import * as http from 'http';
 import * as EventSource from 'eventsource';
 
@@ -62,6 +64,8 @@ const queues: QueueConfig[] = [
 class NplSyncService {
   private amqpManager: AmqpConnectionManager;
   private thingsBoardClient: ThingsBoardClient;
+  private tenantSyncService: TenantSyncService;
+  private deviceSyncService: DeviceSyncService;
   private eventStream: EventSource | null = null;
   private isRunning = false;
   private reconnectAttempts = 0;
@@ -78,6 +82,88 @@ class NplSyncService {
       timeout: 10000
     };
     this.thingsBoardClient = new ThingsBoardClient(tbConfig);
+    
+    // Create real service implementations using the ThingsBoard client
+    const realThingsBoardService: ThingsBoardService = {
+      getAllTenants: async () => {
+        // For now, return empty array - tenant management would need specific TB client methods
+        return [];
+      },
+      getTenantCount: async () => {
+        return 0;
+      },
+      createTenant: async (tenant: any) => {
+        // For now, return mock tenant - would need TB client tenant methods
+        return tenant;
+      },
+      updateTenant: async (id: string, tenant: any) => {
+        return tenant;
+      },
+      deleteTenant: async (id: string) => {
+        // No-op for now
+      }
+    };
+    
+    const realDeviceThingsBoardService = {
+      getAllDevices: async () => {
+        // For now, return empty array - would need TB client device list method
+        return [];
+      },
+      getDeviceCount: async () => {
+        return 0;
+      },
+      createDevice: async (device: any) => {
+        return await this.thingsBoardClient.createDevice(device);
+      },
+      updateDevice: async (id: string, device: any) => {
+        return await this.thingsBoardClient.updateDevice(id, device);
+      },
+      deleteDevice: async (id: string) => {
+        await this.thingsBoardClient.deleteDevice(id);
+      }
+    };
+    
+    // For NPL Engine services, we'll use HTTP calls to the NPL Engine API
+    const realNplEngineService: NplEngineService = {
+      getAllTenants: async () => {
+        const response = await fetch(`${process.env.NPL_ENGINE_URL || 'http://localhost:12000'}/api/tenants`);
+        return (await response.json()) as TenantData[];
+      },
+      getTenantCount: async () => {
+        const response = await fetch(`${process.env.NPL_ENGINE_URL || 'http://localhost:12000'}/api/tenants/count`);
+        return (await response.json()) as number;
+      },
+      createTenant: async (tenant: any) => {
+        const response = await fetch(`${process.env.NPL_ENGINE_URL || 'http://localhost:12000'}/api/tenant`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(tenant)
+        });
+        return (await response.json()) as TenantData;
+      }
+    };
+    
+    const realDeviceNplEngineService = {
+      getAllDevices: async () => {
+        const response = await fetch(`${process.env.NPL_ENGINE_URL || 'http://localhost:12000'}/api/devices`);
+        return (await response.json()) as DeviceData[];
+      },
+      getDeviceCount: async () => {
+        const response = await fetch(`${process.env.NPL_ENGINE_URL || 'http://localhost:12000'}/api/devices/count`);
+        return (await response.json()) as number;
+      },
+      createDevice: async (device: any) => {
+        const response = await fetch(`${process.env.NPL_ENGINE_URL || 'http://localhost:12000'}/api/device`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(device)
+        });
+        return (await response.json()) as DeviceData;
+      }
+    };
+    
+    this.tenantSyncService = new TenantSyncService(realNplEngineService, realThingsBoardService);
+    this.deviceSyncService = new DeviceSyncService(realDeviceNplEngineService, realDeviceThingsBoardService);
   }
 
   /**
@@ -301,6 +387,45 @@ class NplSyncService {
             }
             break;
             
+          // Tenant notifications
+          case 'tenantCreated':
+            const tenant = nplEvent.arguments?.[0]?.value;
+            if (tenant) {
+              await this.tenantSyncService.syncTenantToThingsBoard(tenant, 'create');
+            }
+            break;
+            
+          case 'tenantUpdated':
+            const updatedTenant = nplEvent.arguments?.[0]?.value;
+            if (updatedTenant) {
+              await this.tenantSyncService.syncTenantToThingsBoard(updatedTenant, 'update');
+            }
+            break;
+            
+          case 'tenantDeleted':
+            const deletedTenant = nplEvent.arguments?.[0]?.value;
+            if (deletedTenant) {
+              await this.tenantSyncService.syncTenantToThingsBoard(deletedTenant, 'delete');
+            }
+            break;
+            
+          case 'tenantsBulkImported':
+            const bulkImportData = nplEvent.arguments?.[0]?.value;
+            if (bulkImportData) {
+              console.log(`ℹ️ Bulk import notification received: ${bulkImportData.importedCount} imported, ${bulkImportData.failedCount} failed`);
+              // Trigger full sync to ensure all imported tenants are in ThingsBoard
+              await this.tenantSyncService.syncAllTenantsFromNplToThingsBoard();
+            }
+            break;
+            
+          case 'tenantsBulkDeleted':
+            const bulkDeleteData = nplEvent.arguments?.[0]?.value;
+            if (bulkDeleteData) {
+              console.log(`ℹ️ Bulk delete notification received: ${bulkDeleteData.deletedCount} tenants deleted`);
+              // Individual delete events will handle the sync
+            }
+            break;
+            
           default:
             console.log(`ℹ️ No ThingsBoard sync action for notification: ${nplEvent.name}`);
         }
@@ -363,287 +488,115 @@ class NplSyncService {
           console.log(`ℹ️ No ThingsBoard sync action for command: ${nplEvent.command}`);
       }
     } catch (error) {
-      console.error('❌ Failed to sync to ThingsBoard:', error);
+      console.error('❌ Failed to sync NPL event to ThingsBoard:', error);
     }
   }
 
   /**
-   * Transform NPL event to sync event format
+   * Transform NPL event to a sync event for RabbitMQ
    */
   private transformToSyncEvent(nplEvent: any): any {
-    const eventType = this.mapCommandToEventType(nplEvent.command);
-    
-    return {
-      eventType,
-      eventId: `evt-${Date.now()}`,
-      source: 'npl-device-management',
-      payload: this.extractPayload(nplEvent),
-      metadata: {
-        timestamp: new Date().toISOString(),
-        correlationId: `corr-${Date.now()}`,
-        protocolId: nplEvent.protocolId || 'unknown',
-        userId: nplEvent.userId,
-        tenantId: nplEvent.tenantId
-      }
-    };
-  }
-
-  /**
-   * Map NPL command to event type
-   */
-  private mapCommandToEventType(command: string): string {
-    const commandMap: Record<string, string> = {
-      'saveDevice': 'DEVICE_CREATED',
-      'deleteDevice': 'DEVICE_DELETED',
-      'assignDeviceToCustomer': 'DEVICE_ASSIGNED',
-      'unassignDeviceFromCustomer': 'DEVICE_UNASSIGNED'
-    };
-
-    return commandMap[command] || 'UNKNOWN_EVENT';
-  }
-
-  /**
-   * Extract payload from NPL event
-   */
-  private extractPayload(nplEvent: any): any {
-    switch (nplEvent.command) {
-      case 'saveDevice':
-        return {
-          device: this.sanitizeDeviceData(nplEvent.parameters?.device || {})
-        };
-      
-      case 'deleteDevice':
-        return {
-          deviceId: nplEvent.parameters?.id || nplEvent.parameters?.deviceId
-        };
-      
-      case 'assignDeviceToCustomer':
-        return {
-          deviceId: nplEvent.parameters?.deviceId,
-          customerId: nplEvent.parameters?.customerId
-        };
-      
-      case 'unassignDeviceFromCustomer':
-        return {
-          deviceId: nplEvent.parameters?.deviceId
-        };
-      
-      default:
-        return nplEvent.parameters || {};
-    }
-  }
-
-  /**
-   * Sanitize device data for sync (remove sensitive information)
-   */
-  private sanitizeDeviceData(device: any): any {
-    return {
-      id: device.id,
-      name: device.name,
-      type: device.type,
-      tenantId: device.tenantId,
-      customerId: device.customerId,
-      // Don't sync credentials for security
-      credentials: '',
-      label: device.label,
-      deviceProfileId: device.deviceProfileId,
-      firmwareId: device.firmwareId,
-      softwareId: device.softwareId,
-      externalId: device.externalId,
-      version: device.version,
-      additionalInfo: device.additionalInfo,
-      createdTime: device.createdTime,
-      deviceData: device.deviceData
-    };
-  }
-
-  /**
-   * Get queue name for event type
-   */
-  private getQueueForEvent(nplEvent: any): string | null {
-    // Handle notifications
-    if (nplEvent.type === 'notify') {
-      const notificationQueueMap: Record<string, string> = {
-        'deviceSaved': 'device-sync',
-        'deviceDeleted': 'device-sync',
-        'deviceAssigned': 'device-sync',
-        'deviceUnassigned': 'device-sync',
-        'tenantCreated': 'tenant-sync',
-        'tenantUpdated': 'tenant-sync',
-        'tenantDeleted': 'tenant-sync',
-        'tenantsBulkImported': 'tenant-sync',
-        'tenantsBulkDeleted': 'tenant-sync'
-      };
-      return notificationQueueMap[nplEvent.name] || null;
-    }
-    
-    // Handle command events
-    const commandQueueMap: Record<string, string> = {
-      'saveDevice': 'device-sync',
-      'deleteDevice': 'device-sync',
-      'assignDeviceToCustomer': 'device-sync',
-      'unassignDeviceFromCustomer': 'device-sync',
-      'createTenant': 'tenant-sync',
-      'updateTenant': 'tenant-sync',
-      'deleteTenant': 'tenant-sync',
-      'bulkImportTenants': 'tenant-sync',
-      'bulkDeleteTenants': 'tenant-sync'
-    };
-
-    return commandQueueMap[nplEvent.command] || null;
-  }
-
-  /**
-   * Log system events for monitoring
-   */
-  private logSystemEvent(nplEvent: any): void {
-    console.log('📊 System Event:', {
+    const syncEvent: any = {
       type: nplEvent.type,
       command: nplEvent.command,
       protocolType: nplEvent.protocolType,
       timestamp: nplEvent.timestamp,
-      userId: nplEvent.userId
-    });
+      parameters: nplEvent.parameters
+    };
+
+    // Add specific fields for different event types
+    if (nplEvent.type === 'notify') {
+      syncEvent.name = nplEvent.name;
+      syncEvent.arguments = nplEvent.arguments;
+    } else if (nplEvent.type === 'command') {
+      syncEvent.id = nplEvent.id;
+      syncEvent.command = nplEvent.command;
+      syncEvent.parameters = nplEvent.parameters;
+    }
+
+    return syncEvent;
   }
 
   /**
-   * Handle event stream errors and reconnect
+   * Get the RabbitMQ queue name for an event
+   */
+  private getQueueForEvent(nplEvent: any): string | undefined {
+    if (nplEvent.type === 'notify') {
+      switch (nplEvent.name) {
+        case 'deviceSaved':
+          return 'device-sync';
+        case 'deviceDeleted':
+          return 'device-sync';
+        case 'deviceAssigned':
+          return 'device-sync';
+        case 'deviceUnassigned':
+          return 'device-sync';
+        case 'tenantCreated':
+          return 'tenant-sync';
+        case 'tenantUpdated':
+          return 'tenant-sync';
+        case 'tenantDeleted':
+          return 'tenant-sync';
+        case 'tenantsBulkImported':
+          return 'tenant-sync';
+        case 'tenantsBulkDeleted':
+          return 'tenant-sync';
+        default:
+          return undefined;
+      }
+    } else if (nplEvent.type === 'command') {
+      switch (nplEvent.command) {
+        case 'saveDevice':
+          return 'device-sync';
+        case 'deleteDevice':
+          return 'device-sync';
+        case 'assignDeviceToCustomer':
+          return 'device-sync';
+        case 'unassignDeviceFromCustomer':
+          return 'device-sync';
+        default:
+          return undefined;
+      }
+    }
+    return undefined;
+  }
+
+  /**
+   * Log system events (e.g., connection errors, reconnections)
+   */
+  private logSystemEvent(nplEvent: any): void {
+    if (nplEvent.type === 'error') {
+      console.error('❌ System error:', nplEvent.message);
+    } else if (nplEvent.type === 'reconnect') {
+      console.log(`🔄 Reconnecting to NPL Engine... (Attempt ${this.reconnectAttempts + 1}/${this.maxReconnectAttempts})`);
+      this.reconnectAttempts++;
+      if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+        console.error('❌ Max reconnection attempts reached. Exiting.');
+        process.exit(1);
+      }
+    } else if (nplEvent.type === 'open') {
+      console.log('✅ NPL Engine connection opened.');
+    } else if (nplEvent.type === 'close') {
+      console.log('✅ NPL Engine connection closed.');
+    }
+  }
+
+  /**
+   * Handle event stream errors
    */
   private handleEventStreamError(): void {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      console.log(`🔄 Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-      
-      setTimeout(() => {
-        this.startEventStreamMonitoring();
-      }, 5000 * this.reconnectAttempts); // Exponential backoff
-    } else {
-      console.error('❌ Max reconnection attempts reached');
-    }
-  }
-
-  /**
-   * Simulate business event for testing
-   */
-  async simulateBusinessEvent(command: string, parameters: any): Promise<void> {
-    const nplEvent = {
-      type: 'command',
-      command,
-      parameters,
-      timestamp: new Date().toISOString(),
-      userId: 'test-user',
-      tenantId: 'test-tenant'
-    };
-
-    await this.processBusinessEvent(nplEvent);
-  }
-
-  /**
-   * Get service health status
-   */
-  getHealthStatus(): any {
-    return {
-      isRunning: this.isRunning,
-      amqpHealthy: this.amqpManager.isHealthy(),
-      eventStreamActive: this.eventStream !== null,
-      reconnectAttempts: this.reconnectAttempts,
-      thingsBoardConfigured: !!this.thingsBoardClient,
-      timestamp: new Date().toISOString()
-    };
-  }
-
-  /**
-   * Shutdown the sync service
-   */
-  async shutdown(): Promise<void> {
-    console.log('🛑 Shutting down NPL Sync Service...');
-    
-    this.isRunning = false;
-
-    if (this.eventStream) {
-      this.eventStream.close();
-    }
-
-    await this.amqpManager.close();
-    
-    console.log('✅ NPL Sync Service shutdown complete');
+    console.error('❌ Event stream error. Attempting to reconnect...');
+    this.eventStream?.close();
+    this.eventStream = null;
+    this.startEventStreamMonitoring(); // Re-attempt connection
   }
 }
 
-// Main execution
-async function main() {
-  const syncService = new NplSyncService();
-
-  // Handle graceful shutdown
-  process.on('SIGINT', async () => {
-    console.log('\n🛑 Received SIGINT, shutting down gracefully...');
-    await syncService.shutdown();
-    process.exit(0);
-  });
-
-  process.on('SIGTERM', async () => {
-    console.log('\n🛑 Received SIGTERM, shutting down gracefully...');
-    await syncService.shutdown();
-    process.exit(0);
-  });
-
-  try {
-    await syncService.initialize();
-
-    // Only run test events in development
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('\n🧪 Testing business events...');
-      
-      await syncService.simulateBusinessEvent('saveDevice', {
-        device: {
-          id: 'test-device-001',
-          name: 'Test Device',
-          type: 'sensor',
-          tenantId: 'tenant-001',
-          credentials: 'test-credentials'
-        }
-      });
-
-      await syncService.simulateBusinessEvent('deleteDevice', {
-        deviceId: 'test-device-001'
-      });
-
-      console.log('\n✅ Test events completed');
-    }
-
-    // Start HTTP server for health checks
-    const server = http.createServer((req, res) => {
-      if (req.url === '/health') {
-        const health = syncService.getHealthStatus();
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(health, null, 2));
-      } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        res.end('Not Found');
-      }
-    });
-
-    server.listen(3000, () => {
-      console.log('\n🔄 Sync service is running on port 3000');
-      console.log('📊 Health endpoint: http://localhost:3000/health');
-      console.log('🛑 Press Ctrl+C to stop');
-    });
-    
-    // Log health status every 30 seconds
-    setInterval(() => {
-      const health = syncService.getHealthStatus();
-      console.log('💚 Health Status:', health);
-    }, 30000);
-
-  } catch (error) {
-    console.error('❌ Failed to start sync service:', error);
-    process.exit(1);
-  }
-}
-
-// Run the service if this file is executed directly
-if (require.main === module) {
-  main();
-}
-
-export { NplSyncService }; 
+// Start the service
+const service = new NplSyncService();
+service.initialize().then(() => {
+  console.log('✅ NPL Sync Service is running.');
+}).catch((error) => {
+  console.error('❌ Failed to start NPL Sync Service:', error);
+  process.exit(1);
+});

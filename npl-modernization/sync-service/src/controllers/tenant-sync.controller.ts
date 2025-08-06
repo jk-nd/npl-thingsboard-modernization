@@ -1,14 +1,11 @@
-import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/common';
 import { TenantSyncService } from '../services/tenant-sync.service';
 
-@Controller('api/sync/tenant')
 export class TenantSyncController {
   constructor(private readonly tenantSyncService: TenantSyncService) {}
 
   /**
    * Get sync status
    */
-  @Get('status')
   async getSyncStatus() {
     return await this.tenantSyncService.getSyncStatus();
   }
@@ -16,7 +13,6 @@ export class TenantSyncController {
   /**
    * Force sync from NPL to ThingsBoard
    */
-  @Post('npl-to-thingsboard')
   async syncFromNplToThingsBoard() {
     await this.tenantSyncService.syncAllTenantsFromNplToThingsBoard();
     return { message: 'Sync from NPL to ThingsBoard completed' };
@@ -25,7 +21,6 @@ export class TenantSyncController {
   /**
    * Force sync from ThingsBoard to NPL
    */
-  @Post('thingsboard-to-npl')
   async syncFromThingsBoardToNpl() {
     await this.tenantSyncService.syncAllTenantsFromThingsBoardToNpl();
     return { message: 'Sync from ThingsBoard to NPL completed' };
@@ -34,7 +29,6 @@ export class TenantSyncController {
   /**
    * Force sync all tenants
    */
-  @Post('force-sync')
   async forceSync() {
     await this.tenantSyncService.forceSync();
     return { message: 'Force sync completed' };
@@ -43,8 +37,7 @@ export class TenantSyncController {
   /**
    * Sync specific tenant
    */
-  @Post('tenant/:id')
-  async syncTenant(@Param('id') id: string, @Body() operation: { operation: 'create' | 'update' | 'delete' }) {
+  async syncTenant(id: string, operation: { operation: 'create' | 'update' | 'delete' }) {
     // This would require getting the tenant data first
     // For now, we'll trigger a full sync
     await this.tenantSyncService.forceSync();
@@ -54,7 +47,6 @@ export class TenantSyncController {
   /**
    * Get sync configuration
    */
-  @Get('config')
   async getSyncConfig() {
     return {
       autoSync: true,
@@ -69,8 +61,7 @@ export class TenantSyncController {
   /**
    * Update sync configuration
    */
-  @Put('config')
-  async updateSyncConfig(@Body() config: any) {
+  async updateSyncConfig(config: any) {
     // In a real implementation, this would update the sync configuration
     return { message: 'Sync configuration updated', config };
   }
@@ -78,8 +69,7 @@ export class TenantSyncController {
   /**
    * Get sync logs
    */
-  @Get('logs')
-  async getSyncLogs(@Query('limit') limit = 100, @Query('offset') offset = 0) {
+  async getSyncLogs(limit = 100, offset = 0) {
     // In a real implementation, this would return actual sync logs
     return {
       logs: [
@@ -100,7 +90,6 @@ export class TenantSyncController {
   /**
    * Clear sync logs
    */
-  @Delete('logs')
   async clearSyncLogs() {
     return { message: 'Sync logs cleared' };
   }
@@ -108,7 +97,6 @@ export class TenantSyncController {
   /**
    * Get sync statistics
    */
-  @Get('stats')
   async getSyncStats() {
     const status = await this.tenantSyncService.getSyncStatus();
     
@@ -128,7 +116,6 @@ export class TenantSyncController {
   /**
    * Health check for sync service
    */
-  @Get('health')
   async healthCheck() {
     const status = await this.tenantSyncService.getSyncStatus();
     

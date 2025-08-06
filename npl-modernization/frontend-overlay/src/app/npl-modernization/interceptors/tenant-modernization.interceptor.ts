@@ -17,9 +17,9 @@ export class TenantModernizationInterceptor implements HttpInterceptor {
     
     // Route based on endpoint patterns
     if (this.isTenantWriteOperation(req)) {
-      return this.routeToNplEngine(req);
+      return this.routeToNplEngine(req, next);
     } else if (this.isTenantReadOperation(req)) {
-      return this.routeToGraphQL(req);
+      return this.routeToGraphQL(req, next);
     } else {
       return next.handle(req); // Default to ThingsBoard
     }
@@ -68,7 +68,7 @@ export class TenantModernizationInterceptor implements HttpInterceptor {
   /**
    * Route tenant write operations to NPL Engine
    */
-  private routeToNplEngine(req: HttpRequest<any>): Observable<HttpEvent<any>> {
+  private routeToNplEngine(req: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
     const url = req.url;
     const method = req.method;
     const body = req.body;
@@ -81,12 +81,18 @@ export class TenantModernizationInterceptor implements HttpInterceptor {
     } else if (method === 'PUT' && url.match(/^\/api\/tenant\/([^\/]+)$/)) {
       // Update tenant
       const id = url.split('/').pop();
+      if (!id) {
+        return next.handle(req);
+      }
       return this.tenantNplService.updateTenant(id, body).pipe(
         map(tenant => new HttpResponse({ body: tenant }))
       );
     } else if (method === 'DELETE' && url.match(/^\/api\/tenant\/([^\/]+)$/)) {
       // Delete tenant
       const id = url.split('/').pop();
+      if (!id) {
+        return next.handle(req);
+      }
       return this.tenantNplService.deleteTenant(id).pipe(
         map(() => new HttpResponse({ status: 200 }))
       );
@@ -109,19 +115,25 @@ export class TenantModernizationInterceptor implements HttpInterceptor {
   /**
    * Route tenant read operations to GraphQL
    */
-  private routeToGraphQL(req: HttpRequest<any>): Observable<HttpEvent<any>> {
+  private routeToGraphQL(req: HttpRequest<any>, next: HttpHandler): Observable<HttpEvent<any>> {
     const url = req.url;
     const params = new URLSearchParams(req.params.toString());
 
     if (url.match(/^\/api\/tenant\/([^\/]+)$/)) {
       // Get tenant by ID
       const id = url.split('/').pop();
+      if (!id) {
+        return next.handle(req);
+      }
       return this.tenantGraphQLService.getTenant(id).pipe(
         map(tenant => new HttpResponse({ body: tenant }))
       );
     } else if (url.match(/^\/api\/tenant\/info\/([^\/]+)$/)) {
       // Get tenant info by ID
       const id = url.split('/').pop();
+      if (!id) {
+        return next.handle(req);
+      }
       return this.tenantGraphQLService.getTenantInfo(id).pipe(
         map(tenantInfo => new HttpResponse({ body: tenantInfo }))
       );
