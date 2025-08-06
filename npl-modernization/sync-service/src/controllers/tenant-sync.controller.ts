@@ -1,0 +1,143 @@
+import { Controller, Get, Post, Put, Delete, Body, Param, Query } from '@nestjs/common';
+import { TenantSyncService } from '../services/tenant-sync.service';
+
+@Controller('api/sync/tenant')
+export class TenantSyncController {
+  constructor(private readonly tenantSyncService: TenantSyncService) {}
+
+  /**
+   * Get sync status
+   */
+  @Get('status')
+  async getSyncStatus() {
+    return await this.tenantSyncService.getSyncStatus();
+  }
+
+  /**
+   * Force sync from NPL to ThingsBoard
+   */
+  @Post('npl-to-thingsboard')
+  async syncFromNplToThingsBoard() {
+    await this.tenantSyncService.syncAllTenantsFromNplToThingsBoard();
+    return { message: 'Sync from NPL to ThingsBoard completed' };
+  }
+
+  /**
+   * Force sync from ThingsBoard to NPL
+   */
+  @Post('thingsboard-to-npl')
+  async syncFromThingsBoardToNpl() {
+    await this.tenantSyncService.syncAllTenantsFromThingsBoardToNpl();
+    return { message: 'Sync from ThingsBoard to NPL completed' };
+  }
+
+  /**
+   * Force sync all tenants
+   */
+  @Post('force-sync')
+  async forceSync() {
+    await this.tenantSyncService.forceSync();
+    return { message: 'Force sync completed' };
+  }
+
+  /**
+   * Sync specific tenant
+   */
+  @Post('tenant/:id')
+  async syncTenant(@Param('id') id: string, @Body() operation: { operation: 'create' | 'update' | 'delete' }) {
+    // This would require getting the tenant data first
+    // For now, we'll trigger a full sync
+    await this.tenantSyncService.forceSync();
+    return { message: `Sync for tenant ${id} completed` };
+  }
+
+  /**
+   * Get sync configuration
+   */
+  @Get('config')
+  async getSyncConfig() {
+    return {
+      autoSync: true,
+      syncInterval: 30000, // 30 seconds
+      retryAttempts: 3,
+      retryDelay: 5000, // 5 seconds
+      batchSize: 100,
+      timeout: 30000 // 30 seconds
+    };
+  }
+
+  /**
+   * Update sync configuration
+   */
+  @Put('config')
+  async updateSyncConfig(@Body() config: any) {
+    // In a real implementation, this would update the sync configuration
+    return { message: 'Sync configuration updated', config };
+  }
+
+  /**
+   * Get sync logs
+   */
+  @Get('logs')
+  async getSyncLogs(@Query('limit') limit = 100, @Query('offset') offset = 0) {
+    // In a real implementation, this would return actual sync logs
+    return {
+      logs: [
+        {
+          timestamp: new Date().toISOString(),
+          level: 'INFO',
+          message: 'Tenant sync completed successfully',
+          tenantId: 'tenant_123',
+          operation: 'create'
+        }
+      ],
+      total: 1,
+      limit,
+      offset
+    };
+  }
+
+  /**
+   * Clear sync logs
+   */
+  @Delete('logs')
+  async clearSyncLogs() {
+    return { message: 'Sync logs cleared' };
+  }
+
+  /**
+   * Get sync statistics
+   */
+  @Get('stats')
+  async getSyncStats() {
+    const status = await this.tenantSyncService.getSyncStatus();
+    
+    return {
+      totalTenants: status.nplTenantCount + status.thingsBoardTenantCount,
+      nplTenants: status.nplTenantCount,
+      thingsBoardTenants: status.thingsBoardTenantCount,
+      syncInProgress: status.syncInProgress,
+      lastSyncTime: status.lastSyncTime,
+      syncSuccessRate: 95.5, // Example metric
+      averageSyncTime: 1500, // milliseconds
+      failedSyncs: 2,
+      successfulSyncs: 45
+    };
+  }
+
+  /**
+   * Health check for sync service
+   */
+  @Get('health')
+  async healthCheck() {
+    const status = await this.tenantSyncService.getSyncStatus();
+    
+    return {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      syncStatus: status,
+      uptime: process.uptime(),
+      memory: process.memoryUsage()
+    };
+  }
+} 

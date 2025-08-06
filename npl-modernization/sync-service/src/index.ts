@@ -34,6 +34,12 @@ const queues: QueueConfig[] = [
     autoDelete: false
   },
   {
+    name: 'tenant-sync',
+    routingKey: 'tenant.*',
+    durable: true,
+    autoDelete: false
+  },
+  {
     name: 'asset-sync',
     routingKey: 'asset.*',
     durable: true,
@@ -461,7 +467,12 @@ class NplSyncService {
         'deviceSaved': 'device-sync',
         'deviceDeleted': 'device-sync',
         'deviceAssigned': 'device-sync',
-        'deviceUnassigned': 'device-sync'
+        'deviceUnassigned': 'device-sync',
+        'tenantCreated': 'tenant-sync',
+        'tenantUpdated': 'tenant-sync',
+        'tenantDeleted': 'tenant-sync',
+        'tenantsBulkImported': 'tenant-sync',
+        'tenantsBulkDeleted': 'tenant-sync'
       };
       return notificationQueueMap[nplEvent.name] || null;
     }
@@ -471,7 +482,12 @@ class NplSyncService {
       'saveDevice': 'device-sync',
       'deleteDevice': 'device-sync',
       'assignDeviceToCustomer': 'device-sync',
-      'unassignDeviceFromCustomer': 'device-sync'
+      'unassignDeviceFromCustomer': 'device-sync',
+      'createTenant': 'tenant-sync',
+      'updateTenant': 'tenant-sync',
+      'deleteTenant': 'tenant-sync',
+      'bulkImportTenants': 'tenant-sync',
+      'bulkDeleteTenants': 'tenant-sync'
     };
 
     return commandQueueMap[nplEvent.command] || null;

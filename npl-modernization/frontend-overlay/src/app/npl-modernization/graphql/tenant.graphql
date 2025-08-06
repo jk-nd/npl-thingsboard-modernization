@@ -1,0 +1,87 @@
+# Tenant Management GraphQL Schema
+# This schema defines the read operations for tenant management
+
+type TenantLimits {
+  maxUsers: Int!
+  maxDevices: Int!
+  maxAssets: Int!
+  maxCustomers: Int!
+}
+
+type Tenant {
+  id: ID!
+  name: String!
+  title: String!
+  region: String!
+  country: String!
+  stateName: String!
+  city: String!
+  address: String!
+  address2: String!
+  zip: String!
+  phone: String!
+  email: String!
+  limits: TenantLimits!
+  createdTime: String!
+  additionalInfo: String!
+}
+
+type TenantInfo {
+  tenant: Tenant!
+  tenantProfileName: String!
+}
+
+type PageData {
+  data: [Tenant!]!
+  totalPages: Int!
+  totalElements: Int!
+  hasNext: Boolean!
+}
+
+type TenantInfoPageData {
+  data: [TenantInfo!]!
+  totalPages: Int!
+  totalElements: Int!
+  hasNext: Boolean!
+}
+
+type Query {
+  # Get tenant by ID
+  tenant(id: ID!): Tenant
+  
+  # Get tenant info by ID
+  tenantInfo(id: ID!): TenantInfo
+  
+  # Get all tenants
+  tenants: [Tenant!]!
+  
+  # Get all tenant infos
+  tenantInfos: [TenantInfo!]!
+  
+  # Get tenants with pagination
+  tenantsPaginated(pageSize: Int!, page: Int!): PageData!
+  
+  # Get tenant infos with pagination
+  tenantInfosPaginated(pageSize: Int!, page: Int!): TenantInfoPageData!
+  
+  # Search tenants by name or title
+  searchTenants(searchTerm: String!): [Tenant!]!
+  
+  # Get tenant count
+  tenantCount: Int!
+  
+  # Check if tenant exists
+  tenantExists(id: ID!): Boolean!
+  
+  # Get tenant by name
+  tenantByName(name: String!): Tenant
+}
+
+# Subscriptions for real-time updates
+type Subscription {
+  tenantCreated: Tenant!
+  tenantUpdated: Tenant!
+  tenantDeleted: Tenant!
+  tenantsBulkImported(importedCount: Int!, failedCount: Int!): String!
+  tenantsBulkDeleted(deletedCount: Int!): String!
+} 
