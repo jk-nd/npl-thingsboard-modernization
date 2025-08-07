@@ -121,8 +121,11 @@ class DeviceManagementIntegrationTest {
       try {
         await this.thingsBoardClient.delete(`/api/device/${deviceId}`);
         console.log(`🗑️ Deleted device: ${deviceId}`);
-      } catch (error) {
-        console.warn(`⚠️ Failed to delete device ${deviceId}:`, error);
+      } catch (error: any) {
+        const status = error?.response?.status;
+        const statusText = error?.response?.statusText;
+        const message = error?.message;
+        console.warn(`⚠️ Failed to delete device ${deviceId}. status=${status} statusText=${statusText} message=${message}`);
       }
     }
     

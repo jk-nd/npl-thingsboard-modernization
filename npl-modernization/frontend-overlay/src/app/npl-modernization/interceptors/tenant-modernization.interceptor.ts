@@ -35,8 +35,8 @@ export class TenantModernizationInterceptor implements HttpInterceptor {
     if (method === 'GET') return false;
 
     const writePatterns = [
-      { pattern: /^\/api\/tenant$/, methods: ['POST', 'PUT'] },
-      { pattern: /^\/api\/tenant\/([^\/]+)$/, methods: ['DELETE'] },
+      { pattern: /^\/api\/tenant$/, methods: ['POST'] },
+      { pattern: /^\/api\/tenant\/([^\/]+)$/, methods: ['PUT', 'DELETE'] },
       { pattern: /^\/api\/tenants\/bulk$/, methods: ['POST'] },
       { pattern: /^\/api\/tenants\/bulk\/delete$/, methods: ['POST'] }
     ];
@@ -58,8 +58,8 @@ export class TenantModernizationInterceptor implements HttpInterceptor {
     const readPatterns = [
       /^\/api\/tenant\/([^\/]+)$/,                    // GET /api/tenant/{id}
       /^\/api\/tenant\/info\/([^\/]+)$/,              // GET /api/tenant/info/{id}
-      /^\/api\/tenants$/,                             // GET /api/tenants (with params)
-      /^\/api\/tenantInfos$/                          // GET /api/tenantInfos (with params)
+      /^\/api\/tenants(\?.*)?$/,                      // GET /api/tenants (with params)
+      /^\/api\/tenantInfos(\?.*)?$/                   // GET /api/tenantInfos (with params)
     ];
 
     return readPatterns.some(pattern => pattern.test(url));
@@ -137,14 +137,14 @@ export class TenantModernizationInterceptor implements HttpInterceptor {
       return this.tenantGraphQLService.getTenantInfo(id).pipe(
         map(tenantInfo => new HttpResponse({ body: tenantInfo }))
       );
-    } else if (url === '/api/tenants') {
+    } else if (url.startsWith('/api/tenants')) {
       // Get tenants with pagination
       const pageSize = parseInt(params.get('pageSize') || '10');
       const page = parseInt(params.get('page') || '0');
       return this.tenantGraphQLService.getTenantsPaginated(pageSize, page).pipe(
         map(pageData => new HttpResponse({ body: pageData }))
       );
-    } else if (url === '/api/tenantInfos') {
+    } else if (url.startsWith('/api/tenantInfos')) {
       // Get tenant infos with pagination
       const pageSize = parseInt(params.get('pageSize') || '10');
       const page = parseInt(params.get('page') || '0');

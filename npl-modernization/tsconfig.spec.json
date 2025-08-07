@@ -1,0 +1,26 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/spec",
+    "types": [
+      "jest",
+      "node"
+    ],
+    "esModuleInterop": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "lib": [
+      "es2020",
+      "dom"
+    ],
+    "module": "commonjs",
+    "target": "es2020",
+    "skipLibCheck": true,
+    "isolatedModules": true
+  },
+  "include": [
+    "tests/**/*.spec.ts",
+    "tests/**/*.test.ts",
+    "tests/**/*.d.ts"
+  ]
+}

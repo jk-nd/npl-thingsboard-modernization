@@ -1,11 +1,11 @@
 import { TestBed } from '@angular/core/testing';
-import { HttpRequest, HttpResponse, HttpHandler } from '@angular/common/http';
+import { HttpRequest, HttpResponse, HttpHandler, HttpHeaders } from '@angular/common/http';
 import { of } from 'rxjs';
-import { DeviceModernizationInterceptor } from '../frontend-overlay/src/app/npl-modernization/interceptors/device-modernization.interceptor';
+import { DeviceModernizationInterceptor } from '../../src/app/npl-modernization/interceptors/device-modernization.interceptor';
 
 describe('DeviceModernizationInterceptor', () => {
   let interceptor: DeviceModernizationInterceptor;
-  let mockHandler: jasmine.SpyObj<HttpHandler>;
+  let mockHandler: any;
 
   beforeEach(() => {
     mockHandler = jasmine.createSpyObj('HttpHandler', ['handle']);
@@ -127,7 +127,7 @@ describe('DeviceModernizationInterceptor', () => {
 
       mockHandler.handle.and.returnValue(of(mockResponse));
 
-      interceptor.intercept(request, mockHandler).subscribe(response => {
+      interceptor.intercept(request, mockHandler).subscribe((response: any) => {
         expect(mockHandler.handle).toHaveBeenCalled();
         const nplRequest = mockHandler.handle.calls.mostRecent().args[0];
         expect(nplRequest.url).toContain('deviceManagement.DeviceManagement');
@@ -142,7 +142,7 @@ describe('DeviceModernizationInterceptor', () => {
 
       mockHandler.handle.and.returnValue(of(mockResponse));
 
-      interceptor.intercept(request, mockHandler).subscribe(response => {
+      interceptor.intercept(request, mockHandler).subscribe((response: any) => {
         expect(mockHandler.handle).toHaveBeenCalled();
         const graphqlRequest = mockHandler.handle.calls.mostRecent().args[0];
         expect(graphqlRequest.url).toBe('http://localhost:4000/graphql');
@@ -157,7 +157,7 @@ describe('DeviceModernizationInterceptor', () => {
 
       mockHandler.handle.and.returnValue(of(mockResponse));
 
-      interceptor.intercept(request, mockHandler).subscribe(response => {
+      interceptor.intercept(request, mockHandler).subscribe((response: any) => {
         expect(mockHandler.handle).toHaveBeenCalledWith(request);
         done();
       });
@@ -172,11 +172,11 @@ describe('DeviceModernizationInterceptor', () => {
       mockHandler.handle.and.returnValue(of(errorResponse));
 
       interceptor.intercept(request, mockHandler).subscribe({
-        next: (response) => {
+        next: (response: any) => {
           expect(response.status).toBe(500);
           done();
         },
-        error: (error) => {
+        error: (error: any) => {
           fail('Should not throw error');
         }
       });
@@ -189,11 +189,11 @@ describe('DeviceModernizationInterceptor', () => {
       mockHandler.handle.and.returnValue(of(errorResponse));
 
       interceptor.intercept(request, mockHandler).subscribe({
-        next: (response) => {
+        next: (response: any) => {
           expect(response.status).toBe(404);
           done();
         },
-        error: (error) => {
+        error: (error: any) => {
           fail('Should not throw error');
         }
       });
@@ -228,8 +228,8 @@ describe('DeviceModernizationInterceptor', () => {
     });
 
     it('should preserve existing headers', (done) => {
-      const request = new HttpRequest('POST', '/api/device', { name: 'Test Device' }, null, {
-        headers: { 'Authorization': 'Bearer token123', 'Content-Type': 'application/json' }
+      const request = new HttpRequest('POST', '/api/device', { name: 'Test Device' }, {
+        headers: new HttpHeaders({ 'Authorization': 'Bearer token123', 'Content-Type': 'application/json' })
       });
       const mockResponse = new HttpResponse({ status: 200 });
 

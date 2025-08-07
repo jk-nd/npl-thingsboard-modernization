@@ -109,7 +109,11 @@ export class DeviceModernizationInterceptor implements HttpInterceptor {
     // Transform ThingsBoard device URLs to NPL Engine URLs
     const nplBaseUrl = 'http://localhost:12000/api';
     
-    if (originalUrl.includes('/api/device') && !originalUrl.includes('/api/devices')) {
+    if (originalUrl.includes('/api/devices/bulk/delete')) {
+      return `${nplBaseUrl}/deviceManagement.DeviceManagement/bulkDeleteDevices`;
+    } else if (originalUrl.includes('/api/devices/bulk')) {
+      return `${nplBaseUrl}/deviceManagement.DeviceManagement/bulkImportDevices`;
+    } else if (originalUrl.includes('/api/device') && !originalUrl.includes('/api/devices')) {
       // Single device operations
       if (originalUrl.includes('/assign')) {
         return `${nplBaseUrl}/deviceManagement.DeviceManagement/assignDeviceToCustomer`;
@@ -120,10 +124,6 @@ export class DeviceModernizationInterceptor implements HttpInterceptor {
       } else {
         return `${nplBaseUrl}/deviceManagement.DeviceManagement/saveDevice`;
       }
-    } else if (originalUrl.includes('/api/devices/bulk')) {
-      return `${nplBaseUrl}/deviceManagement.DeviceManagement/bulkImportDevices`;
-    } else if (originalUrl.includes('/api/devices/bulk/delete')) {
-      return `${nplBaseUrl}/deviceManagement.DeviceManagement/bulkDeleteDevices`;
     }
     
     return originalUrl;
