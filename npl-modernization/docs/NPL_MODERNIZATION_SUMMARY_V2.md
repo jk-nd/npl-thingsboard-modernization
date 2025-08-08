@@ -36,6 +36,33 @@ This document provides a comprehensive assessment of modernizing ThingsBoard's *
 | **Shared Infrastructure** | 610 lines (allocated) | 0 lines | **100% elimination** |
 | **Total Backend** | **2,709 lines** | **850 lines** | **68.6% reduction** |
 
+## 🧮 **Function Point Count (Unadjusted)**
+
+Methodology: count unique public operations from the NPL Engine OpenAPI as transactional function counts (no DET/RET weighting to avoid assumptions). Source: running services at `http://localhost:12000`.
+
+- Device Management: 22 transactions (POST: 20 inputs, GET: 2 outputs)
+- Tenant Management: 8 transactions (POST: 6 inputs, GET: 2 outputs)
+- Combined (Device + Tenant): 30 transactions
+
+These figures are reproducible by querying:
+- `/npl/deviceManagement/-/openapi.json` under paths `/npl/deviceManagement/DeviceManagement/{id}/...`
+- `/npl/tenantManagement/-/openapi.json` under paths `/npl/tenantManagement/TenantManagement/{id}/...`
+
+### Function Point Comparison vs Legacy ThingsBoard (Unadjusted)
+
+Scope-limited to the same business functions (controllers only):
+
+- ThingsBoard Device (controller endpoints): 26 transactions
+- ThingsBoard Tenant (controller endpoints): 6 transactions
+- ThingsBoard Combined: 32 transactions
+
+Comparison (NPL vs TB):
+- Device: 22 vs 26 (NPL slightly fewer, some operations consolidated)
+- Tenant: 8 vs 6 (NPL slightly more explicit operations)
+- Combined: 30 vs 32 (roughly the same functional surface)
+
+Conclusion: NPL does not reduce functional points for equivalent business scope; it keeps FP roughly constant while significantly reducing code per FP and complexity. Where differences exist, they reflect consolidation or explicit split of flows, not missing functionality.
+
 ## 🔍 **Detailed Analysis by Module**
 
 ### **Device Management Results**
@@ -185,38 +212,38 @@ The modernization implements a **zero-disruption hybrid approach**:
 
 ## 🧪 **Testing and Quality Assurance**
 
-### **Comprehensive Test Coverage**
+### **Test Coverage Status (hard facts)**
+- Integration tests (real services, no mocks):
+  - `npl-modernization/tests/integration/device-management-integration.test.ts`
+  - `npl-modernization/tests/integration/tenant-management-integration.test.ts`
+- Sync service unit tests:
+  - `npl-modernization/tests/sync-service/device-sync.test.ts`
+  - `npl-modernization/tests/sync-service/tenant-sync.test.ts`
+- UI tests (Angular/Karma) exist for overlay/interceptor behavior.
 
-| Test Category | Device Management | Tenant Management | Status |
-|---------------|------------------|-------------------|--------|
-| **Unit Tests** | ✅ 5 passing | ✅ 5 passing | 100% pass rate |
-| **Integration Tests** | ✅ 3 passing | ✅ 3 passing | 100% pass rate |
-| **UI Tests** | ✅ 15 passing | ✅ 16 passing | 100% pass rate |
-| **Performance Tests** | ✅ Validated | ✅ Validated | Within limits |
+Coverage reporting:
+- Jest coverage is not currently enabled; no percentage published.
+- Legacy ThingsBoard Java modules are not instrumented in this repo; no Jacoco baseline available.
 
-### **Test Infrastructure**
-- **Separated Testing Strategy**: Node.js tests (Jest) + Angular tests (Karma)
-- **Parallel Execution**: Sync service + UI tests run independently
-- **Mock-Free NPL Testing**: Direct protocol testing without complex mocking
-- **Integration Verification**: End-to-end data flow validation
+Action items to enable comparable coverage:
+- Enable `--coverage` for Jest suites and publish per-package summaries.
+- Add Jacoco to the ThingsBoard controller/service modules used in comparison and publish reports.
 
-## 🚀 **Performance and Operational Results**
+## 🚀 **Performance Measurement Status (no speculation)**
 
-### **Performance Metrics**
+- No empirical latency/throughput measurements are included yet.
+- Prior indicative numbers have been removed.
+- Next steps to establish hard metrics:
+  - Add repeatable API micro-benchmarks (Jest + autocannon/k6) for key operations
+  - Capture timings on the running pre-prod stack and report p50/p95 latencies
+  - Include JVM/Node profiling where relevant
 
-| Operation Type | ThingsBoard | NPL Implementation | Performance Impact |
-|----------------|-------------|-------------------|-------------------|
-| **Device Creation** | ~50ms | ~45ms | ✅ 10% faster |
-| **Tenant Creation** | ~35ms | ~32ms | ✅ 8% faster |
-| **Bulk Operations** | Manual transactions | Automatic batching | ✅ 25% more efficient |
-| **Query Operations** | Hand-optimized SQL | GraphQL optimization | ✅ Comparable with caching |
-| **Permission Checks** | Database lookups | In-memory protocol state | ✅ 50% faster |
+Operational benefits (qualitative):
+- Zero-downtime migration via hybrid architecture
+- Backward compatibility during transition
+- Bidirectional synchronization for data consistency
+- Audit trail via NPL engine execution context
 
-### **Operational Benefits**
-- **Zero Downtime Migration**: Hybrid architecture enables gradual transition
-- **Backward Compatibility**: All existing ThingsBoard functionality preserved
-- **Real-time Synchronization**: Bidirectional data consistency maintained
-- **Audit Trail**: Complete operation logging through NPL engine
 
 ## 🔧 **Integration Infrastructure Analysis**
 
@@ -347,3 +374,58 @@ The project proves NPL modernization is **highly effective for**:
 
 *Report Generated: January 2025*  
 *NPL Modernization Team - Phase 2 Completion*
+
+---
+
+## 📌 **Representative Code Snippets (NPL vs ThingsBoard)**
+
+Validation (declarative in NPL vs scattered in Java):
+
+```npl
+// NPL: centralized, declarative
+permission[tenant_admin] saveDevice(device: Device) | active {
+  require(device.name.length() >= 3, "Device name must be at least 3 characters");
+  require(device.type.length() > 0, "Device type cannot be empty");
+  return device;
+};
+```
+
+```java
+// ThingsBoard (typical pattern across layers)
+if (!StringUtils.hasLength(device.getName())) {
+    throw new DataValidationException("Device name should be specified!");
+}
+deviceValidator.validate(device, Device::getTenantId);
+```
+
+Authorization (embedded in NPL vs annotations in Java):
+
+```npl
+permission[sys_admin | tenant_admin] deleteDevice(deviceId: Text) | active { /* ... */ };
+```
+
+```java
+@PreAuthorize("hasAuthority('TENANT_ADMIN') or hasAuthority('SYS_ADMIN')")
+public void deleteDevice(@PathVariable UUID deviceId) { /* ... */ }
+```
+
+Test setup (direct protocol testing vs multi-layer mocks):
+
+```npl
+@test
+function test_device_creation_with_validation(test: Test) -> {
+  var dm = DeviceManagement['tenant_admin']();
+  var result = dm.saveDevice['tenant_admin'](Device(id="d1", name="Demo", type="sensor", tenantId="t1"));
+  test.assertEquals("d1", result.id);
+};
+```
+
+```java
+// Java unit test example (abridged): security + service + DAO mocks
+@Test
+public void testSaveDevice() {
+  // mock security context, services, validators, repositories ...
+  Device result = deviceController.saveDevice(device, token);
+  verify(deviceService).saveDeviceWithAccessToken(device, token);
+}
+```
