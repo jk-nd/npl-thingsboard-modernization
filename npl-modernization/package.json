@@ -10,7 +10,9 @@
     "test:angular": "jest --config jest.config.angular.js",
     "test:integration": "jest --config jest.config.node.js tests/integration",
     "test:sync": "jest --config jest.config.node.js tests/sync-service",
-    "test:ui": "npm --prefix frontend-overlay run test"
+    "test:ui": "npm --prefix frontend-overlay run test",
+    "test:integration:device": "jest --config jest.config.node.js tests/integration/device-management-integration.test.ts",
+    "test:integration:tenant": "jest --config jest.config.node.js tests/integration/tenant-management-integration.test.ts"
   },
   "devDependencies": {
     "@types/jest": "^29.5.12",
