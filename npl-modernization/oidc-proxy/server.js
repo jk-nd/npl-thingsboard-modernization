@@ -62,8 +62,35 @@ app.get('/.well-known/openid-configuration', (req, res) => {
   });
 });
 
+// OIDC Discovery endpoint at issuer URL (for NPL Engine compatibility)
+app.get('/realms/thingsboard/.well-known/openid-configuration', (req, res) => {
+  // Use the service name for internal communication
+  const baseUrl = 'http://oidc-proxy:8080';
+  
+  res.json({
+    issuer: baseUrl,
+    authorization_endpoint: `${baseUrl}/protocol/openid-connect/auth`,
+    token_endpoint: `${baseUrl}/protocol/openid-connect/token`,
+    userinfo_endpoint: `${baseUrl}/protocol/openid-connect/userinfo`,
+    jwks_uri: `${baseUrl}/.well-known/jwks.json`,
+    response_types_supported: ['code', 'token'],
+    subject_types_supported: ['public'],
+    id_token_signing_alg_values_supported: ['RS256'],
+    scopes_supported: ['openid', 'profile', 'email'],
+    token_endpoint_auth_methods_supported: ['client_secret_basic'],
+    claims_supported: ['sub', 'iss', 'exp', 'iat', 'scopes', 'userId', 'tenantId']
+  });
+});
+
 // JWKS endpoint - expose RSA public key
 app.get('/.well-known/jwks.json', (req, res) => {
+  res.json({
+    keys: [pemToJwk(publicKey)]
+  });
+});
+
+// JWKS endpoint at issuer URL (for NPL Engine compatibility)
+app.get('/realms/thingsboard/.well-known/jwks.json', (req, res) => {
   res.json({
     keys: [pemToJwk(publicKey)]
   });
@@ -89,10 +116,11 @@ app.post('/protocol/openid-connect/token', async (req, res) => {
     }
     
     // Create a new JWT with the proxy as issuer using RSA signing
-    const baseUrl = 'http://oidc-proxy:8080';
+    const baseUrl = 'http://oidc-proxy:8080/realms/thingsboard';
     const modifiedPayload = {
       ...decoded.payload,
-      iss: baseUrl // Change issuer to proxy URL
+      iss: baseUrl, // Change issuer to proxy URL
+      preferred_username: decoded.payload.sub // Add preferred_username claim
     };
     
     // Sign the modified JWT with RSA private key

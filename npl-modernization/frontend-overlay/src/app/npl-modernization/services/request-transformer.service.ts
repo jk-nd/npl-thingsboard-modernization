@@ -12,16 +12,13 @@ import { DeviceGraphQLService } from './device-graphql.service';
 })
 export class RequestTransformerService {
   
-  // We'll need to store a protocol instance ID for NPL operations
-  private protocolId: string | null = null
-
   constructor(
     private nplService: NplClientService,
     private graphqlService: DeviceGraphQLService
   ) {}
 
   /**
-   * Check if this is a read operation that should go to GraphQL
+   * Check if this is a device-related read operation that should go to GraphQL
    */
   isReadOperation(req: HttpRequest<any>): boolean {
     const url = req.url;
@@ -29,25 +26,32 @@ export class RequestTransformerService {
 
     if (method !== 'GET') return false;
 
-    // List of read endpoints that should be routed to GraphQL
+    // List of device read endpoints that should be routed to GraphQL
     const readEndpoints = [
-      // Tenant management queries (READ operations)
-      /^\/api\/tenant\/([^\/]+)$/,                    // GET /api/tenant/{id}
-      /^\/api\/tenant\/info\/([^\/]+)$/,              // GET /api/tenant/info/{id}
-      /^\/api\/tenants$/,                             // GET /api/tenants (with params)
-      /^\/api\/tenantInfos$/,                         // GET /api/tenantInfos (with params)
+      // Tenant device queries - these should come FIRST to avoid conflicts
+      /^\/api\/tenant\/devices$/,                     // GET /api/tenant/devices
+      /^\/api\/tenant\/deviceInfos$/,                 // GET /api/tenant/deviceInfos
       
-      // Device queries (READ operations)
-      /^\/api\/devices$/,                             // GET /api/devices (with params)
-      /^\/api\/device\/types$/,                       // GET /api/device/types
-      /^\/api\/device\/([^\/]+)$/,                    // GET /api/device/{id}
-      /^\/api\/device\/info\/([^\/]+)$/,              // GET /api/device/info/{id}
-      /^\/api\/device\/([^\/]+)\/credentials$/,       // GET /api/device/{id}/credentials
-      /^\/api\/device\/limits$/,                      // GET /api/device/limits
-      
-      // Customer queries (READ operations)
+      // Customer device queries - these should come BEFORE device patterns
       /^\/api\/customer\/([^\/]+)\/devices$/,         // GET /api/customer/{id}/devices
       /^\/api\/customer\/([^\/]+)\/deviceInfos$/,     // GET /api/customer/{id}/deviceInfos
+      
+      // Device queries and searches - these should come BEFORE specific device patterns
+      /^\/api\/devices$/,                             // GET /api/devices (with params)
+      /^\/api\/device\/types$/,                       // GET /api/device/types
+      
+      // Device counts
+      /^\/api\/devices\/count\/([^\/]+)\/([^\/]+)$/,  // GET /api/devices/count/{type}/{profileId}
+      
+      // Enhanced features - Device limits (read operation)
+      /^\/api\/device\/limits$/,                      // GET /api/device/limits
+      
+      // Basic device queries - these should come LAST to avoid conflicts
+      /^\/api\/device\/([^\/]+)$/,                    // GET /api/device/{id}
+      /^\/api\/device\/info\/([^\/]+)$/,              // GET /api/device/info/{id}
+      
+      // Device credentials
+      /^\/api\/device\/([^\/]+)\/credentials$/,       // GET /api/device/{id}/credentials
       
       // Telemetry endpoints - these should fall back to ThingsBoard since NPL doesn't have telemetry yet
       /^\/api\/plugins\/telemetry\/DEVICE\/([^\/]+)\/values\/timeseries$/,  // GET telemetry timeseries
@@ -58,7 +62,7 @@ export class RequestTransformerService {
   }
 
   /**
-   * Check if this is a write operation that should go to NPL
+   * Check if this is a device-related write operation that should go to NPL
    */
   isWriteOperation(req: HttpRequest<any>): boolean {
     const url = req.url;
@@ -66,257 +70,192 @@ export class RequestTransformerService {
 
     if (method === 'GET') return false;
 
-    // List of write endpoints that should be routed to NPL
-    const writeEndpoints = [
-      // Tenant management operations (WRITE operations only)
-      { pattern: /^\/api\/tenant$/, methods: ['POST', 'PUT'] },                         // Create/Update tenant
-      { pattern: /^\/api\/tenant\/([^\/]+)$/, methods: ['DELETE'] },                    // Delete tenant
-      { pattern: /^\/api\/tenants\/bulk$/, methods: ['POST'] },                         // Bulk import tenants
-      { pattern: /^\/api\/tenants\/bulk\/delete$/, methods: ['POST'] },                 // Bulk delete tenants
-      
-      // Device operations (WRITE operations only)
+    // List of device write endpoints that should be routed to NPL
+    const deviceWriteEndpoints = [
+      // Device CRUD
       { pattern: /^\/api\/device$/, methods: ['POST', 'PUT'] },                           // Create/Update device
       { pattern: /^\/api\/device\/([^\/]+)$/, methods: ['DELETE'] },                     // Delete device
-      { pattern: /^\/api\/device\/credentials$/, methods: ['POST'] },                    // Save credentials
-      { pattern: /^\/api\/devices\/bulk$/, methods: ['POST'] },                          // Bulk create devices
-      { pattern: /^\/api\/devices\/bulk\/import$/, methods: ['POST'] },                 // Bulk import devices
-      { pattern: /^\/api\/device\/limits$/, methods: ['PUT'] },                          // Update device limits
       
-      // Device-Customer assignment (WRITE operations)
+      // Device-Customer assignment
       { pattern: /^\/api\/customer\/([^\/]+)\/device\/([^\/]+)$/, methods: ['POST'] },   // Assign to customer
       { pattern: /^\/api\/customer\/device\/([^\/]+)$/, methods: ['DELETE'] },           // Unassign from customer
+      
+      // Device credentials
+      { pattern: /^\/api\/device\/credentials$/, methods: ['POST'] },                    // Save credentials
+      
+      // Device claiming
       { pattern: /^\/api\/customer\/device\/([^\/]+)\/claim$/, methods: ['POST', 'DELETE'] }, // Claim/Reclaim
+      
+      // Enhanced features - Bulk operations
+      { pattern: /^\/api\/devices\/bulk$/, methods: ['POST'] },                          // Bulk create devices
+      { pattern: /^\/api\/devices\/bulk\/import$/, methods: ['POST'] },                 // Bulk import devices
+      
+      // Enhanced features - Device limits management
+      { pattern: /^\/api\/device\/limits$/, methods: ['PUT'] },                          // Update device limits
     ];
 
-    return writeEndpoints.some(endpoint => 
+    // List of tenant write endpoints that should be routed to NPL
+    const tenantWriteEndpoints = [
+      // Tenant CRUD
+      { pattern: /^\/api\/tenant$/, methods: ['POST', 'PUT'] },                          // Create/Update tenant
+      { pattern: /^\/api\/tenant\/([^\/]+)$/, methods: ['DELETE'] },                     // Delete tenant
+      
+      // Tenant bulk operations
+      { pattern: /^\/api\/tenants\/bulk$/, methods: ['POST'] },                          // Bulk create tenants
+      { pattern: /^\/api\/tenants\/bulk\/import$/, methods: ['POST'] },                 // Bulk import tenants
+      { pattern: /^\/api\/tenants\/bulk\/delete$/, methods: ['POST'] },                 // Bulk delete tenants
+    ];
+
+    return deviceWriteEndpoints.some(endpoint => 
+      endpoint.pattern.test(url) && endpoint.methods.includes(method)
+    ) || tenantWriteEndpoints.some(endpoint => 
       endpoint.pattern.test(url) && endpoint.methods.includes(method)
     );
   }
 
   /**
-   * Transform a read operation to a GraphQL query
+   * Transform read operations to use GraphQL
    */
   transformToGraphQL(req: HttpRequest<any>): Observable<HttpEvent<any>> {
-    const fullUrl = req.url;
-    // Extract pathname without query parameters for pattern matching
-    const url = fullUrl.split('?')[0];
-    
-    // Telemetry endpoints - fall back to ThingsBoard since NPL doesn't have telemetry yet
-    const telemetryMatch = url.match(/^\/api\/plugins\/telemetry\/DEVICE\/([^\/]+)\/values\/(timeseries|attributes)$/);
-    if (telemetryMatch) {
-      // For now, telemetry requests should fall back to ThingsBoard
-      // In the future, this could be routed to NPL telemetry services
-      throw new Error('Telemetry not implemented in NPL yet - falling back to ThingsBoard');
-    }
-    
-    // NEW: Device search by name
-    const deviceNameMatch = fullUrl.match(/^\/api\/tenant\/devices\?deviceName=(.+)$/);
-    if (deviceNameMatch) {
-      const deviceName = decodeURIComponent(deviceNameMatch[1]);
-      const tenantId = this.getCurrentTenantId(); // You'll need to implement this
-      return from(this.graphqlService.getTenantDeviceByName(tenantId, deviceName))
-        .pipe(map(result => new HttpResponse({ body: result })));
-    }
-    
-    // NEW: Complex device search
-    const queryMatch = fullUrl.match(/^\/api\/devices\?query=(.+)$/);
-    if (queryMatch) {
-      const queryParams = new URLSearchParams(fullUrl.split('?')[1]);
-      const entityId = queryParams.get('entityId') || '';
-      const deviceTypes = queryParams.get('deviceTypes')?.split(',') || [];
-      const textSearch = queryParams.get('textSearch') || undefined;
-      const limit = parseInt(queryParams.get('limit') || '50');
-      
-      return from(this.graphqlService.findDevicesByQuery(entityId, deviceTypes, textSearch, limit))
-        .pipe(map(result => new HttpResponse({ body: result })));
-    }
-    
-    // NEW: Enhanced device info
-    const deviceInfoMatch = url.match(/^\/api\/device\/([^\/]+)\/info$/);
-    if (deviceInfoMatch) {
-      const deviceId = deviceInfoMatch[1];
-      return from(this.graphqlService.getDeviceInfoById(deviceId))
-        .pipe(map(result => new HttpResponse({ body: result })));
-    }
-    
-    // NEW: Tenant device infos with pagination
-    const tenantDeviceInfoMatch = fullUrl.match(/^\/api\/tenant\/deviceInfos/);
-    if (tenantDeviceInfoMatch) {
-      const queryParams = new URLSearchParams(fullUrl.split('?')[1]);
-      const tenantId = this.getCurrentTenantId();
-      const pageSize = parseInt(queryParams.get('pageSize') || '20');
-      const page = parseInt(queryParams.get('page') || '0');
-      const deviceType = queryParams.get('type') || undefined;
-      const active = queryParams.get('active') ? queryParams.get('active') === 'true' : undefined;
-      
-      return from(this.graphqlService.getTenantDeviceInfos(tenantId, pageSize, page, deviceType, active))
-        .pipe(map(result => new HttpResponse({ body: result })));
-    }
-    
-    // NEW: Customer device infos with pagination
-    const customerDeviceInfoMatch = fullUrl.match(/^\/api\/customer\/([^\/]+)\/deviceInfos/);
-    if (customerDeviceInfoMatch) {
-      const customerId = customerDeviceInfoMatch[1];
-      const queryParams = new URLSearchParams(fullUrl.split('?')[1]);
-      const pageSize = parseInt(queryParams.get('pageSize') || '20');
-      const page = parseInt(queryParams.get('page') || '0');
-      const deviceType = queryParams.get('type') || undefined;
-      
-      return from(this.graphqlService.getCustomerDeviceInfos(customerId, pageSize, page, deviceType))
-        .pipe(map(result => new HttpResponse({ body: result })));
-    }
-
-    // GET /api/device/{deviceId}
-    const deviceByIdMatch = url.match(/^\/api\/device\/([^\/]+)$/);
-    if (deviceByIdMatch) {
-      const deviceId = deviceByIdMatch[1];
-      return from(this.graphqlService.getDeviceById(deviceId)).pipe(
-        map(device => this.createHttpResponse(req, device))
-      );
-    }
-
-    // GET /api/device/info/{deviceId}
-    const deviceInfoMatch2 = url.match(/^\/api\/device\/info\/([^\/]+)$/);
-    if (deviceInfoMatch2) {
-      const deviceId = deviceInfoMatch2[1];
-      return from(this.graphqlService.getDeviceInfoById(deviceId))
-        .pipe(map(deviceInfo => this.createHttpResponse(req, deviceInfo)));
-    }
-
-    // GET /api/tenant/devices (with filters)
-    const tenantDevicesMatch = fullUrl.match(/^\/api\/tenant\/devices(\?.*)?$/);
-    if (tenantDevicesMatch) {
-      const queryParams = new URLSearchParams(fullUrl.split('?')[1] || '');
-      const pageSize = parseInt(queryParams.get('pageSize') || '20');
-      const page = parseInt(queryParams.get('page') || '0');
-      const type = queryParams.get('type') || undefined;
-      const textSearch = queryParams.get('textSearch') || undefined;
-
-      return this.graphqlService.getTenantDevices(pageSize, page).pipe(
-        map(devices => this.createHttpResponse(req, devices))
-      );
-    }
-
-    // GET /api/tenant/deviceInfos
-    if (url === '/api/tenant/deviceInfos') {
-      const pageSize = this.getQueryParam(req, 'pageSize') || 10;
-      const page = this.getQueryParam(req, 'page') || 0;
-      return this.graphqlService.getTenantDevices(+pageSize, +page).pipe(
-        map(connection => this.createHttpResponse(req, this.transformConnectionToDeviceInfos(connection)))
-      );
-    }
-
-    // GET /api/customer/{customerId}/devices
-    const customerDevicesMatch = url.match(/^\/api\/customer\/([^\/]+)\/devices$/);
-    if (customerDevicesMatch) {
-      const customerId = customerDevicesMatch[1];
-      const pageSize = this.getQueryParam(req, 'pageSize') || 10;
-      const page = this.getQueryParam(req, 'page') || 0;
-      return this.graphqlService.getCustomerDevices(customerId, +pageSize, +page).pipe(
-        map(connection => this.transformConnectionToThingsBoard(connection))
-      );
-    }
-
-    // GET /api/customer/{customerId}/deviceInfos
-    const customerDeviceInfosMatch = url.match(/^\/api\/customer\/([^\/]+)\/deviceInfos$/);
-    if (customerDeviceInfosMatch) {
-      const customerId = customerDeviceInfosMatch[1];
-      const pageSize = this.getQueryParam(req, 'pageSize') || 10;
-      const page = this.getQueryParam(req, 'page') || 0;
-      return from(this.graphqlService.getCustomerDeviceInfos(customerId, +pageSize, +page)).pipe(
-        map((deviceInfos: any) => this.createHttpResponse(req, { data: deviceInfos, totalElements: deviceInfos.length }))
-      );
-    }
-
-    // GET /api/device/{deviceId}/credentials
-    const deviceCredentialsMatch = url.match(/^\/api\/device\/([^\/]+)\/credentials$/);
-    if (deviceCredentialsMatch) {
-      const deviceId = deviceCredentialsMatch[1];
-      return this.graphqlService.getDeviceCredentials(deviceId).pipe(
-        map(credentials => this.createHttpResponse(req, credentials))
-      );
-    }
-
-    // GET /api/devices with query parameters
-    if (url.startsWith('/api/devices')) {
-      const deviceIds = this.getQueryParam(req, 'deviceIds');
-      const deviceName = this.getQueryParam(req, 'deviceName');
-      
-      // GET /api/devices?deviceIds=x,y,z
-      if (deviceIds) {
-        const idsArray = deviceIds.split(',');
-        return this.graphqlService.getDevicesByIds(idsArray).pipe(
-          map(devices => this.createHttpResponse(req, devices))
-        );
-      }
-      
-      // GET /api/devices?deviceName=xyz
-      if (deviceName) {
-        const pageSize = this.getQueryParam(req, 'pageSize') || 10;
-        const page = this.getQueryParam(req, 'page') || 0;
-        return this.graphqlService.getDevicesByQuery(deviceName, +pageSize, +page).pipe(
-          map(connection => this.transformConnectionToThingsBoard(connection))
-        );
-      }
-      
-      // Default tenant devices for /api/devices
-      const pageSize = this.getQueryParam(req, 'pageSize') || 10;
-      const page = this.getQueryParam(req, 'page') || 0;
-      return this.graphqlService.getTenantDevices(+pageSize, +page).pipe(
-        map(connection => this.transformConnectionToThingsBoard(connection))
-      );
-    }
-
-    // GET /api/device/types
-    if (url === '/api/device/types') {
-      return this.graphqlService.getDeviceTypes().pipe(
-        map(types => this.createHttpResponse(req, types))
-      );
-    }
-
-    // GET /api/devices/count/{otaPackageType}/{deviceProfileId}
-    const deviceCountMatch = url.match(/^\/api\/devices\/count\/([^\/]+)\/([^\/]+)$/);
-    if (deviceCountMatch) {
-      const otaPackageType = deviceCountMatch[1];
-      const deviceProfileId = deviceCountMatch[2];
-      return this.graphqlService.countDevicesByProfile(deviceProfileId, otaPackageType).pipe(
-        map(count => this.createHttpResponse(req, count))
-      );
-    }
-
-    // GET /api/device/limits
-    if (url === '/api/device/limits') {
-      return from(this.graphqlService.getDeviceLimits())
-        .pipe(map(result => new HttpResponse({ body: result })));
-    }
-
-    // If no GraphQL route matches, throw an error
-    throw new Error(`No GraphQL route found for: ${fullUrl}`);
-  }
-
-  /**
-   * Transform POST/PUT/DELETE request to NPL operation
-   */
-  transformToNPL(req: HttpRequest<any>): Observable<HttpEvent<any>> {
-    if (!this.protocolId) {
-      throw new Error('NPL protocol instance not initialized');
-    }
-
     const url = req.url;
     const method = req.method;
 
+    // GET /api/tenant/devices - List tenant devices
+    if (method === 'GET' && url === '/api/tenant/devices') {
+      const pageSize = parseInt(this.getQueryParam(req, 'pageSize') || '10');
+      const page = parseInt(this.getQueryParam(req, 'page') || '0');
+      
+      return this.graphqlService.getTenantDevices(pageSize, page).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // GET /api/tenant/deviceInfos - List tenant device infos
+    if (method === 'GET' && url === '/api/tenant/deviceInfos') {
+      const pageSize = parseInt(this.getQueryParam(req, 'pageSize') || '10');
+      const page = parseInt(this.getQueryParam(req, 'page') || '0');
+      const tenantId = this.getCurrentTenantId();
+      
+      return from(this.graphqlService.getTenantDeviceInfos(tenantId, pageSize, page)).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // GET /api/customer/{customerId}/devices - List customer devices
+    const customerDevicesMatch = url.match(/^\/api\/customer\/([^\/]+)\/devices$/);
+    if (method === 'GET' && customerDevicesMatch) {
+      const customerId = customerDevicesMatch[1];
+      const pageSize = parseInt(this.getQueryParam(req, 'pageSize') || '10');
+      const page = parseInt(this.getQueryParam(req, 'page') || '0');
+      
+      return this.graphqlService.getCustomerDevices(customerId, pageSize, page).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // GET /api/customer/{customerId}/deviceInfos - List customer device infos
+    const customerDeviceInfosMatch = url.match(/^\/api\/customer\/([^\/]+)\/deviceInfos$/);
+    if (method === 'GET' && customerDeviceInfosMatch) {
+      const customerId = customerDeviceInfosMatch[1];
+      const pageSize = parseInt(this.getQueryParam(req, 'pageSize') || '10');
+      const page = parseInt(this.getQueryParam(req, 'page') || '0');
+      
+      return this.graphqlService.getCustomerDeviceInfosObservable(customerId, pageSize, page).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // GET /api/devices - Search devices
+    if (method === 'GET' && url === '/api/devices') {
+      const pageSize = parseInt(this.getQueryParam(req, 'pageSize') || '10');
+      const page = parseInt(this.getQueryParam(req, 'page') || '0');
+      const textSearch = this.getQueryParam(req, 'textSearch') || '';
+      
+      return this.graphqlService.getDevicesByQuery(textSearch, pageSize, page).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // GET /api/device/types - Get device types
+    if (method === 'GET' && url === '/api/device/types') {
+      return this.graphqlService.getDeviceTypes().pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // GET /api/devices/count/{type}/{profileId} - Get device count
+    const countMatch = url.match(/^\/api\/devices\/count\/([^\/]+)\/([^\/]+)$/);
+    if (method === 'GET' && countMatch) {
+      const deviceType = countMatch[1];
+      const profileId = countMatch[2];
+      
+      return this.graphqlService.countDevicesByProfile(profileId, deviceType).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // GET /api/device/limits - Get device limits
+    if (method === 'GET' && url === '/api/device/limits') {
+      return from(this.graphqlService.getDeviceLimits()).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // GET /api/device/{id} - Get device by ID
+    const deviceMatch = url.match(/^\/api\/device\/([^\/]+)$/);
+    if (method === 'GET' && deviceMatch) {
+      const deviceId = deviceMatch[1];
+      
+      return this.graphqlService.getDeviceInfoByIdObservable(deviceId).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // GET /api/device/info/{id} - Get device info by ID
+    const deviceInfoMatch = url.match(/^\/api\/device\/info\/([^\/]+)$/);
+    if (method === 'GET' && deviceInfoMatch) {
+      const deviceId = deviceInfoMatch[1];
+      
+      return this.graphqlService.getDeviceInfoByIdObservable(deviceId).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // GET /api/device/{id}/credentials - Get device credentials
+    const credentialsMatch = url.match(/^\/api\/device\/([^\/]+)\/credentials$/);
+    if (method === 'GET' && credentialsMatch) {
+      const deviceId = credentialsMatch[1];
+      
+      return this.graphqlService.getDeviceCredentials(deviceId).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // If no specific handler found, throw error
+    throw new Error(`Unhandled GraphQL transformation for: ${method} ${url}`);
+  }
+
+  /**
+   * Transform write operations to use NPL Engine
+   */
+  transformToNPL(req: HttpRequest<any>): Observable<HttpEvent<any>> {
+    const url = req.url;
+    const method = req.method;
+
+    // ==================== DEVICE OPERATIONS ====================
+
     // POST /api/device - Create device
     if (method === 'POST' && url === '/api/device') {
-      const device = req.body as any; // Assuming Device type is not directly imported here
-      return this.nplService.saveDevice(this.protocolId, device).pipe(
+      const device = req.body as any;
+      return this.nplService.saveDevice(device).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
 
     // PUT /api/device - Update device
     if (method === 'PUT' && url === '/api/device') {
-      const device = req.body as any; // Assuming Device type is not directly imported here
-      return this.nplService.saveDevice(this.protocolId, device).pipe(
+      const device = req.body as any;
+      return this.nplService.saveDevice(device).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -325,7 +264,7 @@ export class RequestTransformerService {
     const deleteMatch = url.match(/\/api\/device\/([^/]+)$/);
     if (method === 'DELETE' && deleteMatch) {
       const deviceId = deleteMatch[1];
-      return this.nplService.deleteDevice(this.protocolId, deviceId).pipe(
+      return this.nplService.deleteDevice(deviceId).pipe(
         map(result => this.createHttpResponse(req, { success: result }))
       );
     }
@@ -335,7 +274,7 @@ export class RequestTransformerService {
     if (method === 'POST' && assignMatch) {
       const customerId = assignMatch[1];
       const deviceId = assignMatch[2];
-      return this.nplService.assignDeviceToCustomer(this.protocolId, deviceId, customerId).pipe(
+      return this.nplService.assignDeviceToCustomer(deviceId, customerId).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -344,7 +283,7 @@ export class RequestTransformerService {
     const unassignMatch = url.match(/\/api\/customer\/device\/([^\/]+)$/);
     if (method === 'DELETE' && unassignMatch) {
       const deviceId = unassignMatch[1];
-      return this.nplService.unassignDeviceFromCustomer(this.protocolId, deviceId).pipe(
+      return this.nplService.unassignDeviceFromCustomer(deviceId).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -352,7 +291,7 @@ export class RequestTransformerService {
     // POST /api/device/credentials - Save device credentials
     if (method === 'POST' && url === '/api/device/credentials') {
       const credentials = req.body as any;
-      return this.nplService.updateDeviceCredentials(this.protocolId, credentials.deviceId, credentials.credentialsValue).pipe(
+      return this.nplService.updateDeviceCredentials(credentials.deviceId, credentials.credentialsValue).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -362,7 +301,7 @@ export class RequestTransformerService {
     if (method === 'POST' && claimMatch) {
       const deviceName = claimMatch[1];
       const secretKey = req.body?.secretKey || '';
-      return this.nplService.claimDevice(this.protocolId, deviceName, secretKey).pipe(
+      return this.nplService.claimDevice(deviceName, secretKey).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -370,7 +309,58 @@ export class RequestTransformerService {
     // DELETE /api/customer/device/{deviceName}/claim - Reclaim device
     if (method === 'DELETE' && claimMatch) {
       const deviceName = claimMatch[1];
-      return this.nplService.reclaimDevice(this.protocolId, deviceName).pipe(
+      return this.nplService.reclaimDevice(deviceName).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // ==================== TENANT OPERATIONS ====================
+
+    // POST /api/tenant - Create tenant
+    if (method === 'POST' && url === '/api/tenant') {
+      const tenant = req.body as any;
+      return this.nplService.createTenant(tenant).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // PUT /api/tenant - Update tenant
+    if (method === 'PUT' && url === '/api/tenant') {
+      const tenant = req.body as any;
+      return this.nplService.updateTenant(tenant).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // DELETE /api/tenant/{id}
+    const deleteTenantMatch = url.match(/\/api\/tenant\/([^/]+)$/);
+    if (method === 'DELETE' && deleteTenantMatch) {
+      const tenantId = deleteTenantMatch[1];
+      return this.nplService.deleteTenant(tenantId).pipe(
+        map(result => this.createHttpResponse(req, { success: result }))
+      );
+    }
+
+    // POST /api/tenants/bulk - Bulk create tenants
+    if (method === 'POST' && url === '/api/tenants/bulk') {
+      const tenants = req.body as any[];
+      return this.nplService.bulkImportTenants(tenants).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // POST /api/tenants/bulk/import - Bulk import tenants
+    if (method === 'POST' && url === '/api/tenants/bulk/import') {
+      const tenants = req.body as any[];
+      return this.nplService.bulkImportTenants(tenants).pipe(
+        map(result => this.createHttpResponse(req, result))
+      );
+    }
+
+    // POST /api/tenants/bulk/delete - Bulk delete tenants
+    if (method === 'POST' && url === '/api/tenants/bulk/delete') {
+      const tenantIds = req.body as string[];
+      return this.nplService.bulkDeleteTenants(tenantIds).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -379,33 +369,9 @@ export class RequestTransformerService {
     throw new Error(`Unhandled NPL transformation for: ${method} ${url}`);
   }
 
-  /**
-   * Initialize NPL protocol instance
-   */
-  initializeProtocol(): Observable<string> {
-    // Create a simple protocol instance for the current user
-    const parties = [
-      {
-        entity: { email: ['tenant@thingsboard.org'] },
-        access: {}
-      }
-    ];
-
-    return this.nplService.instantiateProtocol(parties).pipe(
-      map((instance: any) => {
-        this.protocolId = instance.protocolId;
-        if (!this.protocolId) {
-          throw new Error('Failed to initialize NPL protocol instance');
-        }
-        return this.protocolId;
-      })
-    );
-  }
-
   private createHttpResponse<T>(req: HttpRequest<any>, body: T): HttpResponse<T> {
     return new HttpResponse({
-      body,
-      headers: req.headers,
+      body: body,
       status: 200,
       statusText: 'OK',
       url: req.url
@@ -417,84 +383,33 @@ export class RequestTransformerService {
     return url.searchParams.get(param);
   }
 
-  /**
-   * Transform GraphQL DevicesConnection to ThingsBoard PageData format
-   */
   private transformConnectionToThingsBoard(connection: any): any {
-    if (!connection) {
-      return { data: [], totalElements: 0, totalPages: 0 };
-    }
-
-    // Group edges by protocolId to reconstruct complete device objects
-    const deviceGroups = new Map<string, any>();
-    
-    connection.edges?.forEach((edge: any) => {
-      const protocolId = edge.node.protocolId;
-      if (!deviceGroups.has(protocolId)) {
-        deviceGroups.set(protocolId, {});
-      }
-      const device = deviceGroups.get(protocolId);
-      device[edge.node.field] = edge.node.value;
-      device.protocolId = protocolId;
-    });
-
-    const devices = Array.from(deviceGroups.values());
-
     return {
-      data: devices,
-      totalElements: connection.totalCount || 0,
-      totalPages: Math.ceil((connection.totalCount || 0) / 10), // Assuming default page size
-      hasNext: connection.pageInfo?.hasNextPage || false
+      pageSize: connection.pageSize,
+      page: connection.page,
+      totalElements: connection.totalElements,
+      totalPages: connection.totalPages,
+      hasNext: connection.hasNext,
+      hasPrevious: connection.hasPrevious,
+      data: connection.data || []
     };
   }
 
-  /**
-   * Transform GraphQL DevicesConnection to DeviceInfo array
-   */
   private transformConnectionToDeviceInfos(connection: any): any {
-    if (!connection) {
-      return { data: [], totalElements: 0 };
-    }
-
-    // Group edges by protocolId to reconstruct complete device objects
-    const deviceGroups = new Map<string, any>();
-    
-    connection.edges?.forEach((edge: any) => {
-      const protocolId = edge.node.protocolId;
-      if (!deviceGroups.has(protocolId)) {
-        deviceGroups.set(protocolId, {});
-      }
-      const device = deviceGroups.get(protocolId);
-      device[edge.node.field] = edge.node.value;
-      device.protocolId = protocolId;
-    });
-
-    // Convert to DeviceInfo format
-    const deviceInfos = Array.from(deviceGroups.values()).map(device => ({
-      id: device.id,
-      name: device.name,
-      type: device.type,
-      label: device.label,
-      deviceProfileId: device.deviceProfileId,
-      deviceProfileName: device.deviceProfileName || device.type, // Fallback
-      customerId: device.customerId,
-      customerTitle: device.customerTitle,
-      active: true, // Would need additional logic
-      lastActivityTime: device.createdTime
-    }));
-
     return {
-      data: deviceInfos,
-      totalElements: connection.totalCount || 0,
-      totalPages: Math.ceil((connection.totalCount || 0) / 10),
-      hasNext: connection.pageInfo?.hasNextPage || false
+      pageSize: connection.pageSize,
+      page: connection.page,
+      totalElements: connection.totalElements,
+      totalPages: connection.totalPages,
+      hasNext: connection.hasNext,
+      hasPrevious: connection.hasPrevious,
+      data: connection.data || []
     };
   }
 
-  // Helper method to get current tenant ID (implement based on your auth system)
   private getCurrentTenantId(): string {
-    // TODO: Implement based on your authentication system
-    // This might come from JWT token, session, or user context
-    return 'default-tenant-id';
+    // This would need to be extracted from the JWT token or user context
+    // For now, return a hardcoded tenant ID
+    return '7211c450-742e-11f0-9d1a-913de8284e4f';
   }
 } 

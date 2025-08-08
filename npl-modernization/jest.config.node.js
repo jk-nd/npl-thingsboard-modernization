@@ -13,5 +13,9 @@ module.exports = {
   moduleNameMapper: {
     '^@services/(.*)$': '<rootDir>/sync-service/src/services/$1',
     '^@test/(.*)$': '<rootDir>/tests/$1'
-  }
+  },
+  // Run tests in band to avoid worker serialization issues with axios error objects
+  maxWorkers: 1,
+  // Alternative: use runInBand flag in package.json scripts
+  // runInBand: true
 };

@@ -1,7 +1,7 @@
 import { Injectable } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Observable, from } from 'rxjs';
-import { map, switchMap } from 'rxjs/operators';
+import { Observable, from, BehaviorSubject, of } from 'rxjs';
+import { map, switchMap, tap, catchError } from 'rxjs/operators';
 
 export interface Device {
   id?: string;
@@ -13,12 +13,21 @@ export interface Device {
   createdTime?: number;
 }
 
+export interface Tenant {
+  id?: string;
+  name: string;
+  title?: string;
+  region?: string;
+  tenantProfileId?: string;
+  version?: number;
+  createdTime?: number;
+}
+
 export interface NplProtocolInstance {
-  protocolId: string;
-  parties: Array<{
-    entity: { [key: string]: string[] };
-    access: any;
-  }>;
+  '@id': string;
+  '@actions': { [key: string]: string };
+  '@parties': any;
+  '@state': string;
 }
 
 @Injectable({
@@ -28,11 +37,76 @@ export class NplClientService {
   private readonly NPL_ENGINE_URL = 'http://localhost:12000';
   private readonly OIDC_PROXY_URL = 'http://localhost:8080';
   
-  // Our deployed protocol details
-  private readonly PROTOCOL_PACKAGE = 'deviceManagement';
-  private readonly PROTOCOL_NAME = 'DeviceManagement';
+  // Protocol packages and names
+  private readonly DEVICE_PROTOCOL_PACKAGE = 'deviceManagement';
+  private readonly DEVICE_PROTOCOL_NAME = 'DeviceManagement';
+  private readonly TENANT_PROTOCOL_PACKAGE = 'tenantManagement';
+  private readonly TENANT_PROTOCOL_NAME = 'TenantManagement';
+  
+  // Protocol instance ID cache
+  private deviceProtocolInstanceId: string | null = null;
+  private tenantProtocolInstanceId: string | null = null;
 
   constructor(private http: HttpClient) {}
+
+  /**
+   * Get or create device protocol instance
+   */
+  private getOrCreateDeviceProtocolInstance(): Observable<string> {
+    if (this.deviceProtocolInstanceId) {
+      return of(this.deviceProtocolInstanceId);
+    }
+
+    return this.createProtocolInstance(this.DEVICE_PROTOCOL_PACKAGE, this.DEVICE_PROTOCOL_NAME).pipe(
+      tap(instanceId => {
+        this.deviceProtocolInstanceId = instanceId;
+        console.log(`Device protocol instance created: ${instanceId}`);
+      })
+    );
+  }
+
+  /**
+   * Get or create tenant protocol instance
+   */
+  private getOrCreateTenantProtocolInstance(): Observable<string> {
+    if (this.tenantProtocolInstanceId) {
+      return of(this.tenantProtocolInstanceId);
+    }
+
+    return this.createProtocolInstance(this.TENANT_PROTOCOL_PACKAGE, this.TENANT_PROTOCOL_NAME).pipe(
+      tap(instanceId => {
+        this.tenantProtocolInstanceId = instanceId;
+        console.log(`Tenant protocol instance created: ${instanceId}`);
+      })
+    );
+  }
+
+  /**
+   * Create a protocol instance using the NPL Engine API
+   */
+  private createProtocolInstance(packageName: string, protocolName: string): Observable<string> {
+    return this.getAuthToken().pipe(
+      switchMap(token => {
+        const url = `${this.NPL_ENGINE_URL}/npl/${packageName}/${protocolName}/`;
+        const payload = {
+          "@parties": {}
+        };
+
+        return this.http.post<NplProtocolInstance>(url, payload, { headers: this.createHeaders(token) });
+      }),
+      map(response => {
+        const instanceId = response['@id'];
+        if (!instanceId) {
+          throw new Error('No protocol instance ID returned');
+        }
+        return instanceId;
+      }),
+      catchError(error => {
+        console.error('Failed to create protocol instance:', error);
+        throw error;
+      })
+    );
+  }
 
   /**
    * Get authentication token from OIDC Proxy
@@ -62,154 +136,160 @@ export class NplClientService {
   }
 
   /**
-   * Instantiate a new DeviceManagement protocol
+   * Call a device protocol operation using dynamic instance ID
    */
-  instantiateProtocol(parties: Array<{ entity: { [key: string]: string[] }, access: any }>): Observable<NplProtocolInstance> {
-    return this.getAuthToken().pipe(
-      switchMap(token => {
-        const instantiationRequest = {
-          package: this.PROTOCOL_PACKAGE,
-          protocol: this.PROTOCOL_NAME,
-          parties: parties,
-          initialArguments: {}
-        };
-
-        return this.http.post<{ protocolId: string }>(
-          `${this.NPL_ENGINE_URL}/api/protocol/instantiate`,
-          instantiationRequest,
-          { headers: this.createHeaders(token) }
-        ).pipe(
-          map(response => ({
-            protocolId: response.protocolId,
-            parties: parties
-          }))
+  private callDeviceProtocolOperation(operation: string, payload: any): Observable<any> {
+    return this.getOrCreateDeviceProtocolInstance().pipe(
+      switchMap(instanceId => {
+        return this.getAuthToken().pipe(
+          switchMap(token => {
+            const url = `${this.NPL_ENGINE_URL}/npl/${this.DEVICE_PROTOCOL_PACKAGE}/${this.DEVICE_PROTOCOL_NAME}/${instanceId}/${operation}`;
+            return this.http.post(url, payload, { headers: this.createHeaders(token) });
+          })
         );
       })
     );
   }
 
   /**
-   * Call a protocol operation (permission)
+   * Call a tenant protocol operation using dynamic instance ID
    */
-  callOperation(protocolId: string, operation: string, payload: any): Observable<any> {
-    return this.getAuthToken().pipe(
-      switchMap(token => {
-        const operationRequest = {
-          operation: operation,
-          arguments: payload
-        };
-
-        return this.http.post(
-          `${this.NPL_ENGINE_URL}/api/protocol/${protocolId}/call`,
-          operationRequest,
-          { headers: this.createHeaders(token) }
+  private callTenantProtocolOperation(operation: string, payload: any): Observable<any> {
+    return this.getOrCreateTenantProtocolInstance().pipe(
+      switchMap(instanceId => {
+        return this.getAuthToken().pipe(
+          switchMap(token => {
+            const url = `${this.NPL_ENGINE_URL}/npl/${this.TENANT_PROTOCOL_PACKAGE}/${this.TENANT_PROTOCOL_NAME}/${instanceId}/${operation}`;
+            return this.http.post(url, payload, { headers: this.createHeaders(token) });
+          })
         );
       })
     );
   }
 
+  // ==================== DEVICE OPERATIONS ====================
+
   /**
-   * Save/Create a device
+   * Save a device using dynamic protocol instance
    */
-  saveDevice(protocolId: string, device: Device): Observable<Device> {
-    return this.callOperation(protocolId, 'saveDevice', { device }).pipe(
-      map(response => response.device || device)
-    );
+  saveDevice(device: Device): Observable<Device> {
+    return this.callDeviceProtocolOperation('saveDevice', { device });
   }
 
   /**
-   * Delete a device
+   * Delete a device using dynamic protocol instance
    */
-  deleteDevice(protocolId: string, deviceId: string): Observable<boolean> {
-    return this.callOperation(protocolId, 'deleteDevice', { deviceId }).pipe(
-      map(response => response.success || true)
-    );
+  deleteDevice(deviceId: string): Observable<boolean> {
+    return this.callDeviceProtocolOperation('deleteDevice', { id: deviceId });
   }
 
   /**
-   * Assign device to customer
+   * Assign device to customer using dynamic protocol instance
    */
-  assignDeviceToCustomer(protocolId: string, deviceId: string, customerId: string): Observable<Device> {
-    return this.callOperation(protocolId, 'assignDeviceToCustomer', { deviceId, customerId }).pipe(
-      map(response => response.device)
-    );
+  assignDeviceToCustomer(deviceId: string, customerId: string): Observable<Device> {
+    return this.callDeviceProtocolOperation('assignDeviceToCustomer', { deviceId, customerId });
   }
 
   /**
-   * Unassign device from customer
+   * Unassign device from customer using dynamic protocol instance
    */
-  unassignDeviceFromCustomer(protocolId: string, deviceId: string): Observable<Device> {
-    return this.callOperation(protocolId, 'unassignDeviceFromCustomer', { deviceId }).pipe(
-      map(response => response.device)
-    );
+  unassignDeviceFromCustomer(deviceId: string): Observable<Device> {
+    return this.callDeviceProtocolOperation('unassignDeviceFromCustomer', { deviceId });
   }
 
   /**
-   * Update device credentials
+   * Update device credentials using dynamic protocol instance
    */
-  updateDeviceCredentials(protocolId: string, deviceId: string, credentials: any): Observable<any> {
-    return this.callOperation(protocolId, 'saveDeviceCredentials', { deviceId, credentials }).pipe(
-      map(response => response.credentials)
-    );
+  updateDeviceCredentials(deviceId: string, credentials: any): Observable<any> {
+    return this.callDeviceProtocolOperation('saveDeviceCredentials', { deviceId, credentials });
   }
 
   /**
-   * Delete device credentials
+   * Delete device credentials using dynamic protocol instance
    */
-  deleteDeviceCredentials(protocolId: string, deviceId: string): Observable<boolean> {
-    return this.callOperation(protocolId, 'deleteDeviceCredentials', { deviceId }).pipe(
-      map(response => response.success || true)
-    );
+  deleteDeviceCredentials(deviceId: string): Observable<boolean> {
+    return this.callDeviceProtocolOperation('deleteDeviceCredentials', { deviceId });
   }
 
   /**
-   * Claim device
+   * Claim device using dynamic protocol instance
    */
-  claimDevice(protocolId: string, deviceName: string, secretKey: string): Observable<Device> {
-    return this.callOperation(protocolId, 'claimDevice', { deviceName, secretKey }).pipe(
-      map(response => response.device)
-    );
+  claimDevice(deviceName: string, secretKey: string): Observable<Device> {
+    return this.callDeviceProtocolOperation('claimDevice', { deviceId: deviceName, secretKey });
   }
 
   /**
-   * Re-claim device
+   * Reclaim device using dynamic protocol instance
    */
-  reclaimDevice(protocolId: string, deviceId: string): Observable<Device> {
-    return this.callOperation(protocolId, 'reclaimDevice', { deviceId }).pipe(
-      map(response => response.device)
-    );
+  reclaimDevice(deviceId: string): Observable<Device> {
+    return this.callDeviceProtocolOperation('reclaimDevice', { deviceId });
   }
 
   /**
-   * Get protocol state information
+   * Get device protocol state using dynamic protocol instance
    */
-  getProtocolState(protocolId: string): Observable<any> {
-    return this.getAuthToken().pipe(
-      switchMap(token => {
-        return this.http.get(
-          `${this.NPL_ENGINE_URL}/api/protocol/${protocolId}/state`,
-          { headers: this.createHeaders(token) }
+  getDeviceProtocolState(): Observable<any> {
+    return this.getOrCreateDeviceProtocolInstance().pipe(
+      switchMap(instanceId => {
+        return this.getAuthToken().pipe(
+          switchMap(token => {
+            const url = `${this.NPL_ENGINE_URL}/npl/${this.DEVICE_PROTOCOL_PACKAGE}/${this.DEVICE_PROTOCOL_NAME}/${instanceId}/`;
+            return this.http.get(url, { headers: this.createHeaders(token) });
+          })
         );
       })
     );
   }
 
+  // ==================== TENANT OPERATIONS ====================
+
   /**
-   * Listen to protocol notifications
+   * Create a tenant using dynamic protocol instance
    */
-  subscribeToNotifications(protocolId: string): Observable<any> {
-    return this.getAuthToken().pipe(
-      switchMap(token => {
-        // For now, return empty observable - we'll implement EventSource later
-        return new Observable(observer => {
-          // EventSource implementation would go here
-          // const eventSource = new EventSource(
-          //   `${this.NPL_ENGINE_URL}/api/protocol/${protocolId}/notifications`,
-          //   { headers: { Authorization: `Bearer ${token}` } }
-          // );
-          
-          setTimeout(() => observer.complete(), 1000); // Placeholder
-        });
+  createTenant(tenant: Tenant): Observable<Tenant> {
+    return this.callTenantProtocolOperation('createTenant', { tenant });
+  }
+
+  /**
+   * Update a tenant using dynamic protocol instance
+   */
+  updateTenant(tenant: Tenant): Observable<Tenant> {
+    return this.callTenantProtocolOperation('updateTenant', { tenant });
+  }
+
+  /**
+   * Delete a tenant using dynamic protocol instance
+   */
+  deleteTenant(tenantId: string): Observable<boolean> {
+    return this.callTenantProtocolOperation('deleteTenant', { tenantId });
+  }
+
+  /**
+   * Bulk import tenants using dynamic protocol instance
+   */
+  bulkImportTenants(tenants: Tenant[]): Observable<any> {
+    return this.callTenantProtocolOperation('bulkImportTenants', { tenants });
+  }
+
+  /**
+   * Bulk delete tenants using dynamic protocol instance
+   */
+  bulkDeleteTenants(tenantIds: string[]): Observable<any> {
+    return this.callTenantProtocolOperation('bulkDeleteTenants', { tenantIds });
+  }
+
+  /**
+   * Get tenant protocol state using dynamic protocol instance
+   */
+  getTenantProtocolState(): Observable<any> {
+    return this.getOrCreateTenantProtocolInstance().pipe(
+      switchMap(instanceId => {
+        return this.getAuthToken().pipe(
+          switchMap(token => {
+            const url = `${this.NPL_ENGINE_URL}/npl/${this.TENANT_PROTOCOL_PACKAGE}/${this.TENANT_PROTOCOL_NAME}/${instanceId}/`;
+            return this.http.get(url, { headers: this.createHeaders(token) });
+          })
+        );
       })
     );
   }

@@ -46,10 +46,12 @@ services:
     ports:
       - "8080:8080"
     environment:
-      THINGSBOARD_URL: http://host.docker.internal:9090
+      THINGSBOARD_URL: http://mytb-core:8080
       THINGSBOARD_JWT_SECRET: thingsboard
     depends_on:
       - postgres
+    networks:
+      - npl-network
 
   engine:
     image: "ghcr.io/noumenadigital/images/engine:latest"

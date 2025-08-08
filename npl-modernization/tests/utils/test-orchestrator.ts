@@ -10,6 +10,22 @@ export interface TestServiceConfig {
     username: string;
     password: string;
   };
+  sysadminCredentials: {
+    username: string;
+    password: string;
+  };
+}
+
+// Safe error serialization utility to avoid circular references
+function serializeError(error: any): string {
+  try {
+    if (error?.response) {
+      return `HTTP ${error.response.status}: ${error.response.statusText} - ${error.response.data?.message || error.message || 'Unknown error'}`;
+    }
+    return error?.message || String(error);
+  } catch {
+    return 'Unknown error (failed to serialize)';
+  }
 }
 
 export class TestOrchestrator {
@@ -25,6 +41,10 @@ export class TestOrchestrator {
       credentials: {
         username: process.env.TB_USERNAME || 'tenant@thingsboard.org',
         password: process.env.TB_PASSWORD || 'tenant'
+      },
+      sysadminCredentials: {
+        username: process.env.TB_SYSADMIN_USERNAME || 'sysadmin@thingsboard.org',
+        password: process.env.TB_SYSADMIN_PASSWORD || 'sysadmin'
       }
     };
   }
@@ -61,8 +81,8 @@ export class TestOrchestrator {
     console.log('🧹 Cleaning up test data...');
     
     try {
-      // Get auth token for cleanup
-      const token = await this.authenticateWithThingsBoard();
+      // Get auth token for cleanup - use sysadmin for tenant operations
+      const token = await this.authenticateAsSysadmin();
       
       // Clean up test devices
       const devicesResponse = await axios.get(`${this.config.thingsBoardUrl}/api/tenant/devices`, {
@@ -130,6 +150,24 @@ export class TestOrchestrator {
     }
   }
 
+  async authenticateAsSysadmin(): Promise<string> {
+    console.log('🔐 Authenticating with ThingsBoard as Sysadmin...');
+    
+    try {
+      const response = await axios.post(`${this.config.thingsBoardUrl}/api/auth/login`, {
+        username: this.config.sysadminCredentials.username,
+        password: this.config.sysadminCredentials.password
+      });
+
+      const token = response.data.token;
+      console.log('✅ Sysadmin authentication successful');
+      return token;
+    } catch (error: any) {
+      console.error('❌ Sysadmin authentication failed:', error.response?.data || error.message);
+      throw new Error('Failed to authenticate as sysadmin with ThingsBoard');
+    }
+  }
+
   async waitForSync(deviceId: string, timeout: number = 30000): Promise<void> {
     console.log(`⏳ Waiting for device ${deviceId} to sync...`);
     
@@ -163,7 +201,7 @@ export class TestOrchestrator {
     console.log(`⏳ Waiting for tenant ${tenantId} to sync...`);
     
     const startTime = Date.now();
-    const token = await this.authenticateWithThingsBoard();
+    const token = await this.authenticateAsSysadmin();
     
     while (Date.now() - startTime < timeout) {
       try {
