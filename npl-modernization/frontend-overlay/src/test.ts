@@ -4,8 +4,8 @@ import { BrowserDynamicTestingModule, platformBrowserDynamicTesting } from '@ang
 
 getTestBed().initTestEnvironment(BrowserDynamicTestingModule, platformBrowserDynamicTesting());
 
-// Load all spec/test files from tests/ui directory
-const context = (require as any).context('../tests/ui', true, /\.spec\.ts$|\.test\.ts$/);
+// Load all spec files from the src directory
+const context = (require as any).context('./', true, /\.spec\.ts$/);
 context.keys().forEach(context);
 
 

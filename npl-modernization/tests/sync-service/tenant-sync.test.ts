@@ -1,4 +1,4 @@
-import { TenantSyncService, TenantData, NplEngineService, ThingsBoardService } from '../../sync-service/src/services/tenant-sync.service';
+import { TenantSyncService, TenantData, NplEngineService, ThingsBoardService } from '@services/tenant-sync.service';
 import { expect, jest, describe, beforeEach, test } from '@jest/globals';
 
 describe('TenantSyncService', () => {

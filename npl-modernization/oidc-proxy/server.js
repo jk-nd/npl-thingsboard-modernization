@@ -142,6 +142,51 @@ app.post('/protocol/openid-connect/token', async (req, res) => {
   }
 });
 
+// Token exchange endpoint - accept existing TB JWT and re-sign with proxy issuer
+app.post('/protocol/openid-connect/token/exchange', async (req, res) => {
+  try {
+    // Prefer Authorization: Bearer <tb_jwt>, fallback to body.token
+    let tbJwt = '';
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      tbJwt = authHeader.substring(7);
+    } else if (req.body && typeof req.body.token === 'string') {
+      tbJwt = req.body.token;
+    }
+
+    if (!tbJwt) {
+      return res.status(400).json({ error: 'missing_token', error_description: 'Provide TB JWT in Authorization header or body.token' });
+    }
+
+    const decoded = jwt.decode(tbJwt, { complete: true });
+    if (!decoded) {
+      return res.status(400).json({ error: 'invalid_token', error_description: 'Failed to decode JWT' });
+    }
+
+    const baseUrl = 'http://oidc-proxy:8080/realms/thingsboard';
+    const modifiedPayload = {
+      ...decoded.payload,
+      iss: baseUrl,
+      preferred_username: decoded.payload.sub
+    };
+
+    const modifiedToken = jwt.sign(modifiedPayload, privateKey, {
+      algorithm: 'RS256',
+      keyid: 'proxy-key-1'
+    });
+
+    res.json({
+      access_token: modifiedToken,
+      token_type: 'Bearer',
+      expires_in: 3600,
+      scope: 'openid profile'
+    });
+  } catch (error) {
+    console.error('Token exchange error:', error.message);
+    res.status(400).json({ error: 'invalid_token' });
+  }
+});
+
 // UserInfo endpoint
 app.get('/protocol/openid-connect/userinfo', async (req, res) => {
   try {

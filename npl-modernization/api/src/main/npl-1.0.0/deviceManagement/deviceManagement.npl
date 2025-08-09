@@ -338,15 +338,24 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
      */
     @api
     permission[sys_admin | tenant_admin] saveDevice(device: Device) returns Device | active {
+        // Derive tenantId from authenticated party if not set
+        var effectiveTenantId = device.tenantId;
+        if (effectiveTenantId.length() == 0) {
+            // parties() returns a Map<PartyId, Party>; fetch first PartyId via keys()->toList()->firstOrNone()
+            var firstPartyId = parties().keys().toList().firstOrNone().getOrFail();
+            var caller = parties().getOrNone(firstPartyId).getOrFail();
+            var tenantIdValues = caller.entity().getOrNone("tenantId");
+            effectiveTenantId = tenantIdValues.getOrFail().toList().firstOrNone().getOrFail();
+        };
         // Comprehensive validation using require statements
         require(device.name.length() >= 3, "Device name must be at least 3 characters long");
         require(device.name.length() <= 255, "Device name cannot exceed 255 characters");
         require(device.type.length() > 0, "Device type cannot be empty");
-        require(device.tenantId.length() > 0, "Tenant ID cannot be empty");
+        require(effectiveTenantId.length() > 0, "Tenant ID cannot be empty");
         require(!isReservedName(device.name), "Device name is reserved and cannot be used");
         
         // Check tenant device limits
-        var currentTenantDevices = getDeviceCountForTenant(device.tenantId);
+        var currentTenantDevices = getDeviceCountForTenant(effectiveTenantId);
         require(currentTenantDevices < maxDevicesPerTenant, "Tenant device limit exceeded");
         
         // Check customer device limits if customer is assigned
@@ -386,7 +395,7 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
             id = device.id,
             name = device.name,
             type = device.type,
-            tenantId = device.tenantId,
+            tenantId = effectiveTenantId,
             customerId = customerIdForDevice,
             credentials = credentialsValue,
             label = device.label,

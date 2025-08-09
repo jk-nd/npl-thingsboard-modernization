@@ -1,4 +1,4 @@
-import { DeviceSyncService, DeviceData, NplEngineService, ThingsBoardService } from '../../sync-service/src/services/device-sync.service';
+import { DeviceSyncService, DeviceData, NplEngineService, ThingsBoardService } from '@services/device-sync.service';
 import { expect, jest, describe, beforeEach, test } from '@jest/globals';
 
 describe('DeviceSyncService', () => {
@@ -16,6 +16,7 @@ describe('DeviceSyncService', () => {
   };
 
   beforeEach(() => {
+    // Create real service mocks that match the actual interfaces
     mockNplEngineService = {
       getAllDevices: jest.fn(async () => [mockDevice]),
       getDeviceCount: jest.fn(async () => 1),
@@ -35,12 +36,17 @@ describe('DeviceSyncService', () => {
 
   test('syncs device creation to ThingsBoard', async () => {
     await deviceSyncService.syncDeviceToThingsBoard(mockDevice, 'create');
-    expect(mockThingsBoardService.createDevice).toHaveBeenCalledWith(expect.objectContaining({ id: mockDevice.id, name: mockDevice.name }));
+    expect(mockThingsBoardService.createDevice).toHaveBeenCalledWith(expect.objectContaining({ 
+      id: mockDevice.id, 
+      name: mockDevice.name 
+    }));
   });
 
   test('syncs device update to ThingsBoard', async () => {
     await deviceSyncService.syncDeviceToThingsBoard(mockDevice, 'update');
-    expect(mockThingsBoardService.updateDevice).toHaveBeenCalledWith(mockDevice.id, expect.objectContaining({ id: mockDevice.id }));
+    expect(mockThingsBoardService.updateDevice).toHaveBeenCalledWith(mockDevice.id, expect.objectContaining({ 
+      id: mockDevice.id 
+    }));
   });
 
   test('syncs device deletion to ThingsBoard', async () => {
@@ -49,16 +55,23 @@ describe('DeviceSyncService', () => {
   });
 
   test('full sync creates missing devices in ThingsBoard', async () => {
+    // Mock the services to return different data for this test
     (mockThingsBoardService.getAllDevices as any).mockResolvedValueOnce([]);
     (mockNplEngineService.getAllDevices as any).mockResolvedValueOnce([mockDevice]);
 
     await deviceSyncService.syncAllDevicesFromNplToThingsBoard();
 
-    expect(mockThingsBoardService.createDevice).toHaveBeenCalledWith(expect.objectContaining({ id: mockDevice.id }));
+    expect(mockThingsBoardService.createDevice).toHaveBeenCalledWith(expect.objectContaining({ 
+      id: mockDevice.id 
+    }));
   });
 
   test('getSyncStatus returns both counts and status', async () => {
     const status = await deviceSyncService.getSyncStatus();
-    expect(status).toEqual(expect.objectContaining({ nplDeviceCount: 1, thingsBoardDeviceCount: 0, syncInProgress: false }));
+    expect(status).toEqual(expect.objectContaining({ 
+      nplDeviceCount: 1, 
+      thingsBoardDeviceCount: 0, 
+      syncInProgress: false 
+    }));
   });
 });

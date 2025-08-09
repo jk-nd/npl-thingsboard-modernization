@@ -109,20 +109,68 @@ export class NplClientService {
   }
 
   /**
-   * Get authentication token from OIDC Proxy
+   * Get or exchange JWT token for NPL Engine
    */
   private getAuthToken(): Observable<string> {
-    const authRequest = {
-      username: 'tenant@thingsboard.org',
-      password: 'tenant'
-    };
+    // First, try to get the current JWT from the browser's localStorage or sessionStorage
+    const currentToken = this.getCurrentJWT();
+    
+    if (currentToken) {
+      // Exchange the current TB JWT for a proxy-signed token
+      return this.http.post<{ access_token: string }>(
+        `${this.OIDC_PROXY_URL}/protocol/openid-connect/token/exchange`,
+        {},
+        { headers: { 'Authorization': `Bearer ${currentToken}` } }
+      ).pipe(
+        map(response => response.access_token),
+        catchError(error => {
+          console.error('Failed to exchange token:', error);
+          // Fallback: try to get a new token directly
+          return this.getNewToken();
+        })
+      );
+    } else {
+      // No current token, try to get a new one
+      return this.getNewToken();
+    }
+  }
 
-    return this.http.post<{ access_token: string }>(
-      `${this.OIDC_PROXY_URL}/protocol/openid-connect/token`,
-      authRequest
-    ).pipe(
-      map(response => response.access_token)
-    );
+  /**
+   * Get current JWT from browser storage
+   */
+  private getCurrentJWT(): string | null {
+    // Try to get from localStorage first (ThingsBoard stores it there)
+    const token = localStorage.getItem('jwt_token') || 
+                  localStorage.getItem('access_token') ||
+                  sessionStorage.getItem('jwt_token') ||
+                  sessionStorage.getItem('access_token');
+    
+    if (token) {
+      return token;
+    }
+
+    // Try to get from the current page's context (if running in browser)
+    if (typeof window !== 'undefined' && window.location) {
+      // Check if there's a token in the URL or page context
+      const urlParams = new URLSearchParams(window.location.search);
+      const tokenFromUrl = urlParams.get('token');
+      if (tokenFromUrl) {
+        return tokenFromUrl;
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get a new JWT token by authenticating with ThingsBoard
+   */
+  private getNewToken(): Observable<string> {
+    // This would require credentials, so we'll throw an error
+    // In a real implementation, this would prompt for login
+    return new Observable(observer => {
+      observer.error(new Error('No authentication token available. Please log in first.'));
+    });
   }
 
   /**
@@ -138,10 +186,11 @@ export class NplClientService {
   /**
    * Call a device protocol operation using dynamic instance ID
    */
-  private callDeviceProtocolOperation(operation: string, payload: any): Observable<any> {
+  private callDeviceProtocolOperation(operation: string, payload: any, authToken?: string): Observable<any> {
     return this.getOrCreateDeviceProtocolInstance().pipe(
       switchMap(instanceId => {
-        return this.getAuthToken().pipe(
+        const tokenObservable = authToken ? of(authToken) : this.getAuthToken();
+        return tokenObservable.pipe(
           switchMap(token => {
             const url = `${this.NPL_ENGINE_URL}/npl/${this.DEVICE_PROTOCOL_PACKAGE}/${this.DEVICE_PROTOCOL_NAME}/${instanceId}/${operation}`;
             return this.http.post(url, payload, { headers: this.createHeaders(token) });
@@ -154,10 +203,11 @@ export class NplClientService {
   /**
    * Call a tenant protocol operation using dynamic instance ID
    */
-  private callTenantProtocolOperation(operation: string, payload: any): Observable<any> {
+  private callTenantProtocolOperation(operation: string, payload: any, authToken?: string): Observable<any> {
     return this.getOrCreateTenantProtocolInstance().pipe(
       switchMap(instanceId => {
-        return this.getAuthToken().pipe(
+        const tokenObservable = authToken ? of(authToken) : this.getAuthToken();
+        return tokenObservable.pipe(
           switchMap(token => {
             const url = `${this.NPL_ENGINE_URL}/npl/${this.TENANT_PROTOCOL_PACKAGE}/${this.TENANT_PROTOCOL_NAME}/${instanceId}/${operation}`;
             return this.http.post(url, payload, { headers: this.createHeaders(token) });
@@ -172,57 +222,57 @@ export class NplClientService {
   /**
    * Save a device using dynamic protocol instance
    */
-  saveDevice(device: Device): Observable<Device> {
-    return this.callDeviceProtocolOperation('saveDevice', { device });
+  saveDevice(device: Device, authToken?: string): Observable<Device> {
+    return this.callDeviceProtocolOperation('saveDevice', { device }, authToken);
   }
 
   /**
    * Delete a device using dynamic protocol instance
    */
-  deleteDevice(deviceId: string): Observable<boolean> {
-    return this.callDeviceProtocolOperation('deleteDevice', { id: deviceId });
+  deleteDevice(deviceId: string, authToken?: string): Observable<boolean> {
+    return this.callDeviceProtocolOperation('deleteDevice', { id: deviceId }, authToken);
   }
 
   /**
    * Assign device to customer using dynamic protocol instance
    */
-  assignDeviceToCustomer(deviceId: string, customerId: string): Observable<Device> {
-    return this.callDeviceProtocolOperation('assignDeviceToCustomer', { deviceId, customerId });
+  assignDeviceToCustomer(deviceId: string, customerId: string, authToken?: string): Observable<Device> {
+    return this.callDeviceProtocolOperation('assignDeviceToCustomer', { deviceId, customerId }, authToken);
   }
 
   /**
    * Unassign device from customer using dynamic protocol instance
    */
-  unassignDeviceFromCustomer(deviceId: string): Observable<Device> {
-    return this.callDeviceProtocolOperation('unassignDeviceFromCustomer', { deviceId });
+  unassignDeviceFromCustomer(deviceId: string, authToken?: string): Observable<Device> {
+    return this.callDeviceProtocolOperation('unassignDeviceFromCustomer', { deviceId }, authToken);
   }
 
   /**
    * Update device credentials using dynamic protocol instance
    */
-  updateDeviceCredentials(deviceId: string, credentials: any): Observable<any> {
-    return this.callDeviceProtocolOperation('saveDeviceCredentials', { deviceId, credentials });
+  updateDeviceCredentials(deviceId: string, credentials: any, authToken?: string): Observable<any> {
+    return this.callDeviceProtocolOperation('saveDeviceCredentials', { deviceId, credentials }, authToken);
   }
 
   /**
    * Delete device credentials using dynamic protocol instance
    */
-  deleteDeviceCredentials(deviceId: string): Observable<boolean> {
-    return this.callDeviceProtocolOperation('deleteDeviceCredentials', { deviceId });
+  deleteDeviceCredentials(deviceId: string, authToken?: string): Observable<boolean> {
+    return this.callDeviceProtocolOperation('deleteDeviceCredentials', { deviceId }, authToken);
   }
 
   /**
    * Claim device using dynamic protocol instance
    */
-  claimDevice(deviceName: string, secretKey: string): Observable<Device> {
-    return this.callDeviceProtocolOperation('claimDevice', { deviceId: deviceName, secretKey });
+  claimDevice(deviceName: string, secretKey: string, authToken?: string): Observable<Device> {
+    return this.callDeviceProtocolOperation('claimDevice', { deviceId: deviceName, secretKey }, authToken);
   }
 
   /**
    * Reclaim device using dynamic protocol instance
    */
-  reclaimDevice(deviceId: string): Observable<Device> {
-    return this.callDeviceProtocolOperation('reclaimDevice', { deviceId });
+  reclaimDevice(deviceId: string, authToken?: string): Observable<Device> {
+    return this.callDeviceProtocolOperation('reclaimDevice', { deviceId }, authToken);
   }
 
   /**
@@ -246,36 +296,36 @@ export class NplClientService {
   /**
    * Create a tenant using dynamic protocol instance
    */
-  createTenant(tenant: Tenant): Observable<Tenant> {
-    return this.callTenantProtocolOperation('createTenant', { tenant });
+  createTenant(tenant: Tenant, authToken?: string): Observable<Tenant> {
+    return this.callTenantProtocolOperation('createTenant', { tenant }, authToken);
   }
 
   /**
    * Update a tenant using dynamic protocol instance
    */
-  updateTenant(tenant: Tenant): Observable<Tenant> {
-    return this.callTenantProtocolOperation('updateTenant', { tenant });
+  updateTenant(tenant: Tenant, authToken?: string): Observable<Tenant> {
+    return this.callTenantProtocolOperation('updateTenant', { tenant }, authToken);
   }
 
   /**
    * Delete a tenant using dynamic protocol instance
    */
-  deleteTenant(tenantId: string): Observable<boolean> {
-    return this.callTenantProtocolOperation('deleteTenant', { tenantId });
+  deleteTenant(tenantId: string, authToken?: string): Observable<boolean> {
+    return this.callTenantProtocolOperation('deleteTenant', { tenantId }, authToken);
   }
 
   /**
    * Bulk import tenants using dynamic protocol instance
    */
-  bulkImportTenants(tenants: Tenant[]): Observable<any> {
-    return this.callTenantProtocolOperation('bulkImportTenants', { tenants });
+  bulkImportTenants(tenants: Tenant[], authToken?: string): Observable<any> {
+    return this.callTenantProtocolOperation('bulkImportTenants', { tenants }, authToken);
   }
 
   /**
    * Bulk delete tenants using dynamic protocol instance
    */
-  bulkDeleteTenants(tenantIds: string[]): Observable<any> {
-    return this.callTenantProtocolOperation('bulkDeleteTenants', { tenantIds });
+  bulkDeleteTenants(tenantIds: string[], authToken?: string): Observable<any> {
+    return this.callTenantProtocolOperation('bulkDeleteTenants', { tenantIds }, authToken);
   }
 
   /**

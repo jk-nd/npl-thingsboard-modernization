@@ -242,12 +242,19 @@ export class RequestTransformerService {
     const url = req.url;
     const method = req.method;
 
+    // Extract JWT token from the original request
+    const authToken = this.extractAuthToken(req);
+
     // ==================== DEVICE OPERATIONS ====================
 
     // POST /api/device - Create device
     if (method === 'POST' && url === '/api/device') {
       const device = req.body as any;
-      return this.nplService.saveDevice(device).pipe(
+      // Do not rely on client-provided tenantId; NPL will derive from Party
+      // Forward minimal fields; backend enriches.
+      const payload = { ...device };
+      delete (payload as any).tenantId;
+      return this.nplService.saveDevice(payload, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -255,7 +262,7 @@ export class RequestTransformerService {
     // PUT /api/device - Update device
     if (method === 'PUT' && url === '/api/device') {
       const device = req.body as any;
-      return this.nplService.saveDevice(device).pipe(
+      return this.nplService.saveDevice(device, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -264,7 +271,7 @@ export class RequestTransformerService {
     const deleteMatch = url.match(/\/api\/device\/([^/]+)$/);
     if (method === 'DELETE' && deleteMatch) {
       const deviceId = deleteMatch[1];
-      return this.nplService.deleteDevice(deviceId).pipe(
+      return this.nplService.deleteDevice(deviceId, authToken).pipe(
         map(result => this.createHttpResponse(req, { success: result }))
       );
     }
@@ -274,7 +281,7 @@ export class RequestTransformerService {
     if (method === 'POST' && assignMatch) {
       const customerId = assignMatch[1];
       const deviceId = assignMatch[2];
-      return this.nplService.assignDeviceToCustomer(deviceId, customerId).pipe(
+      return this.nplService.assignDeviceToCustomer(deviceId, customerId, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -283,7 +290,7 @@ export class RequestTransformerService {
     const unassignMatch = url.match(/\/api\/customer\/device\/([^\/]+)$/);
     if (method === 'DELETE' && unassignMatch) {
       const deviceId = unassignMatch[1];
-      return this.nplService.unassignDeviceFromCustomer(deviceId).pipe(
+      return this.nplService.unassignDeviceFromCustomer(deviceId, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -291,7 +298,13 @@ export class RequestTransformerService {
     // POST /api/device/credentials - Save device credentials
     if (method === 'POST' && url === '/api/device/credentials') {
       const credentials = req.body as any;
-      return this.nplService.updateDeviceCredentials(credentials.deviceId, credentials.credentialsValue).pipe(
+      const deviceCredentials = {
+        deviceId: credentials.deviceId,
+        credentialsType: credentials.credentialsType || 'ACCESS_TOKEN',
+        credentialsId: credentials.credentialsId || credentials.deviceId,
+        credentialsValue: credentials.credentialsValue
+      };
+      return this.nplService.updateDeviceCredentials(credentials.deviceId, deviceCredentials, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -301,7 +314,7 @@ export class RequestTransformerService {
     if (method === 'POST' && claimMatch) {
       const deviceName = claimMatch[1];
       const secretKey = req.body?.secretKey || '';
-      return this.nplService.claimDevice(deviceName, secretKey).pipe(
+      return this.nplService.claimDevice(deviceName, secretKey, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -309,7 +322,7 @@ export class RequestTransformerService {
     // DELETE /api/customer/device/{deviceName}/claim - Reclaim device
     if (method === 'DELETE' && claimMatch) {
       const deviceName = claimMatch[1];
-      return this.nplService.reclaimDevice(deviceName).pipe(
+      return this.nplService.reclaimDevice(deviceName, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -319,7 +332,7 @@ export class RequestTransformerService {
     // POST /api/tenant - Create tenant
     if (method === 'POST' && url === '/api/tenant') {
       const tenant = req.body as any;
-      return this.nplService.createTenant(tenant).pipe(
+      return this.nplService.createTenant(tenant, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -327,7 +340,7 @@ export class RequestTransformerService {
     // PUT /api/tenant - Update tenant
     if (method === 'PUT' && url === '/api/tenant') {
       const tenant = req.body as any;
-      return this.nplService.updateTenant(tenant).pipe(
+      return this.nplService.updateTenant(tenant, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -336,7 +349,7 @@ export class RequestTransformerService {
     const deleteTenantMatch = url.match(/\/api\/tenant\/([^/]+)$/);
     if (method === 'DELETE' && deleteTenantMatch) {
       const tenantId = deleteTenantMatch[1];
-      return this.nplService.deleteTenant(tenantId).pipe(
+      return this.nplService.deleteTenant(tenantId, authToken).pipe(
         map(result => this.createHttpResponse(req, { success: result }))
       );
     }
@@ -344,7 +357,7 @@ export class RequestTransformerService {
     // POST /api/tenants/bulk - Bulk create tenants
     if (method === 'POST' && url === '/api/tenants/bulk') {
       const tenants = req.body as any[];
-      return this.nplService.bulkImportTenants(tenants).pipe(
+      return this.nplService.bulkImportTenants(tenants, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -352,7 +365,7 @@ export class RequestTransformerService {
     // POST /api/tenants/bulk/import - Bulk import tenants
     if (method === 'POST' && url === '/api/tenants/bulk/import') {
       const tenants = req.body as any[];
-      return this.nplService.bulkImportTenants(tenants).pipe(
+      return this.nplService.bulkImportTenants(tenants, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -360,7 +373,7 @@ export class RequestTransformerService {
     // POST /api/tenants/bulk/delete - Bulk delete tenants
     if (method === 'POST' && url === '/api/tenants/bulk/delete') {
       const tenantIds = req.body as string[];
-      return this.nplService.bulkDeleteTenants(tenantIds).pipe(
+      return this.nplService.bulkDeleteTenants(tenantIds, authToken).pipe(
         map(result => this.createHttpResponse(req, result))
       );
     }
@@ -411,5 +424,13 @@ export class RequestTransformerService {
     // This would need to be extracted from the JWT token or user context
     // For now, return a hardcoded tenant ID
     return '7211c450-742e-11f0-9d1a-913de8284e4f';
+  }
+
+  private extractAuthToken(req: HttpRequest<any>): string | undefined {
+    const authHeader = req.headers.get('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      return authHeader.substring(7); // Remove "Bearer "
+    }
+    return undefined;
   }
 } 
