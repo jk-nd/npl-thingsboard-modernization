@@ -107,7 +107,7 @@ export class DeviceModernizationInterceptor implements HttpInterceptor {
 
   private transformToNplUrl(originalUrl: string): string {
     // Transform ThingsBoard device URLs to NPL Engine URLs
-    const nplBaseUrl = 'http://localhost:12000/api';
+    const nplBaseUrl = '/api/npl';
     
     if (originalUrl.includes('/api/devices/bulk/delete')) {
       return `${nplBaseUrl}/deviceManagement.DeviceManagement/bulkDeleteDevices`;
@@ -131,6 +131,6 @@ export class DeviceModernizationInterceptor implements HttpInterceptor {
 
   private transformToGraphQLUrl(originalUrl: string): string {
     // Transform to GraphQL endpoint
-    return 'http://localhost:4000/graphql';
+    return '/api/graphql';
   }
 } 

@@ -9,7 +9,7 @@ import { setContext } from '@apollo/client/link/context';
   providedIn: 'root'
 })
 export class GraphQLConfigService {
-  private readonly READ_MODEL_URL = 'http://localhost:5555/graphql';
+  private readonly READ_MODEL_URL = '/api/graphql';
   private readonly OIDC_PROXY_URL = 'http://localhost:8080';
 
   constructor(

@@ -178,7 +178,6 @@ protocol[sys_admin, tenant_admin] CustomerAssignment(var deviceId: Text) {
      */
     @api
     permission[sys_admin | tenant_admin] unassignFromCustomer() | assigned {
-        var oldCustomerId = customerId.getOrFail();
         customerId = optionalOf<Text>();
         notify deviceUnassigned(deviceId);
         become unassigned;
@@ -280,13 +279,13 @@ protocol[sys_admin, tenant_admin, customer_user] DeviceManagement() {
 
     initial state active;
     
-    // Core device storage
-    private var devices = mapOf<Text, Device>();
+    // Core device storage - PUBLIC for GraphQL access
+    var devices: Map<Text, Device> = mapOf<Text, Device>();
     
-    // Composed protocol instances for each device
-    private var deviceCredentials = mapOf<Text, DeviceCredentialsManager>();
-    private var customerAssignments = mapOf<Text, CustomerAssignment>();
-    private var edgeAssignments = mapOf<Text, EdgeAssignment>();
+    // Composed protocol instances for each device - PUBLIC for GraphQL access
+    var deviceCredentials: Map<Text, DeviceCredentialsManager> = mapOf<Text, DeviceCredentialsManager>();
+    var customerAssignments: Map<Text, CustomerAssignment> = mapOf<Text, CustomerAssignment>();
+    var edgeAssignments: Map<Text, EdgeAssignment> = mapOf<Text, EdgeAssignment>();
 
     // Device validation constants
     private var reservedNames = setOf("admin", "system", "root", "test", "default", "null", "undefined");

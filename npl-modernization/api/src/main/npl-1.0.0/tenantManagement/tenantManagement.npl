@@ -190,13 +190,13 @@ function createTenantInfo(tenant: Tenant) -> {
 @api
 protocol[sys_admin] TenantManagement() {
     
-    // States
+    // States  
     initial state active;
     final state deleted;
     
-    // Data structures
-    private var tenants = mapOf<Text, Tenant>();
-    private var tenantInfos = mapOf<Text, TenantInfo>();
+    // Data structures - PUBLIC for GraphQL access
+    var tenants: Map<Text, Tenant> = mapOf<Text, Tenant>();
+    var tenantInfos: Map<Text, TenantInfo> = mapOf<Text, TenantInfo>();
     
     /**
      * Create a new tenant (WRITE operation)
@@ -275,6 +275,7 @@ protocol[sys_admin] TenantManagement() {
         tenantInfos = tenantInfos.without(id);
         
         notify tenantDeleted(tenant);
+        become deleted;
     };
     
     /**

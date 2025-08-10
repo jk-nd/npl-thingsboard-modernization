@@ -1,27 +1,74 @@
-# FrontendOverlay
+# NPL Frontend Overlay
 
-This project was generated with [Angular CLI](https://github.com/angular/angular-cli) version 13.3.11.
+**⚠️ DEPRECATED**: This Angular overlay has been replaced by the **Service Worker integration approach**.
 
-## Development server
+## Current Implementation: Service Worker
 
-Run `ng serve` for a dev server. Navigate to `http://localhost:4200/`. The application will automatically reload if you change any of the source files.
+The NPL modernization now uses a **Service Worker** (`ui-ngx/src/assets/overlay/npl-service-worker.js`) to intercept and route ThingsBoard UI requests to NPL backend services.
 
-## Code scaffolding
+### Key Benefits of Service Worker Approach:
+- ✅ **No frontend code changes** required in ThingsBoard UI
+- ✅ **Seamless integration** with existing UI
+- ✅ **Request interception** at the network level
+- ✅ **Read-your-writes consistency** built-in
+- ✅ **Easier deployment** and maintenance
 
-Run `ng generate component component-name` to generate a new component. You can also use `ng generate directive|pipe|service|class|guard|interface|enum|module`.
+## Service Worker Location
 
-## Build
+The active Service Worker implementation is located at:
+```
+ui-ngx/src/assets/overlay/npl-service-worker.js
+```
 
-Run `ng build` to build the project. The build artifacts will be stored in the `dist/` directory.
+## Documentation
 
-## Running unit tests
+For complete Service Worker implementation details, see:
+- [Service Worker Integration Guide](../docs/SERVICE_WORKER_INTEGRATION.md)
+- [Frontend Integration Analysis](../docs/FRONTEND_INTEGRATION_ANALYSIS.md)
 
-Run `ng test` to execute the unit tests via [Karma](https://karma-runner.github.io).
+## Legacy Angular Overlay (DEPRECATED)
 
-## Running end-to-end tests
+This directory contains the previous Angular-based overlay approach, which has been superseded by the Service Worker implementation. The Angular components are kept for reference but are not actively used.
 
-Run `ng e2e` to execute the end-to-end tests via a platform of your choice. To use this command, you need to first add a package that implements end-to-end testing capabilities.
+### Previous Implementation
+- Angular HTTP interceptors
+- Custom services and components
+- Complex routing configuration
+- Extensive frontend modifications required
 
-## Further help
+### Migration to Service Worker
+The Service Worker approach eliminates the need for:
+- Angular build pipeline modifications
+- Custom HTTP interceptors
+- Complex service dependencies
+- Frontend code changes
 
-To get more help on the Angular CLI use `ng help` or go check out the [Angular CLI Overview and Command Reference](https://angular.io/cli) page.
+## Build (Legacy)
+
+If you need to work with the legacy Angular overlay:
+
+```bash
+# Install dependencies
+npm install
+
+# Build the project
+ng build
+
+# Run tests
+ng test
+
+# Development server
+ng serve
+```
+
+Build artifacts are stored in the `dist/` directory and deployed to `../overlay/` for nginx serving.
+
+## Current Status
+
+**Active**: Service Worker at `ui-ngx/src/assets/overlay/npl-service-worker.js`  
+**Deprecated**: Angular overlay in this directory  
+**Recommended**: Use Service Worker for all new development
+
+---
+
+*This README reflects the transition to Service Worker-based integration. For current implementation details, refer to the Service Worker documentation.*

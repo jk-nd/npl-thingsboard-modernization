@@ -62,6 +62,16 @@ wait_for_healthy "engine"
 echo "--- Step 5: Starting ThingsBoard (mytb-core) and UI (mytb-ui)..."
 docker-compose up -d mytb-core mytb-ui
 
+wait_for_healthy "mytb-core"
+
+echo "--- Step 6: Bootstrapping NPL protocol instances..."
+cd npl-modernization
+chmod +x bootstrap-protocols.sh
+./bootstrap-protocols.sh
+cd ..
+
 echo ""
-echo "--- ✅ All services are starting up in the correct order."
+echo "--- ✅ All services are running and NPL protocols are bootstrapped!"
+echo "--- ThingsBoard UI: http://localhost:8081"
+echo "--- Default login: tenant@thingsboard.org / tenant"
 echo "--- To monitor ThingsBoard, run: docker-compose logs -f mytb-core" 

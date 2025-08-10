@@ -5,27 +5,27 @@ This directory contains comprehensive integration tests for the NPL (Noumena Pro
 ## Overview
 
 The test suite validates the complete integration between:
-- **ThingsBoard UI** (Direct access via port 8082)
-- **NPL Proxy** (Enhanced UI with NPL overlay via port 8081)
+- **ThingsBoard UI** (Enhanced with Service Worker via port 8081)
+- **NPL Service Worker** (Request interception and routing)
 - **NPL Engine** (Protocol execution and write operations)
 - **NPL Read Model** (GraphQL queries for read operations)
 - **Sync Service** (Data synchronization between NPL and ThingsBoard)
 
 ## Test Categories
 
-### 📖 Read Operation Tests (GraphQL)
-- `getDeviceById` - Retrieve device by ID via GraphQL
-- `getDeviceInfoById` - Enhanced device info with metadata
-- `getTenantDevices` - Paginated device listing
+### 📖 Read Operation Tests (Service Worker → GraphQL)
+- `getDeviceById` - Service Worker intercepts → GraphQL query
+- `getDeviceInfoById` - Enhanced device info via GraphQL
+- `getTenantDevices` - Paginated device listing via GraphQL
 - `getCustomerDevices` - Customer-specific device queries
-- `getDeviceTypes` - Available device types
-- `searchDevices` - Device search with filters
-- `getDeviceCredentials` - Device authentication credentials
+- `getDeviceTypes` - Available device types via GraphQL
+- `searchDevices` - Device search with GraphQL filters
+- `getDeviceCredentials` - Device credentials via GraphQL
 
-### ✏️ Write Operation Tests (NPL Engine)
-- `createDevice` - Device creation via NPL protocol
-- `updateDevice` - Device modification via NPL protocol
-- `deleteDevice` - Device deletion via NPL protocol
+### ✏️ Write Operation Tests (Service Worker → NPL Engine)
+- `createDevice` - Service Worker intercepts → NPL Engine protocol
+- `updateDevice` - Device modification via NPL Engine
+- `deleteDevice` - Device deletion via NPL Engine
 - `assignDeviceToCustomer` - Customer assignment operations
 - `unassignDeviceFromCustomer` - Customer unassignment operations
 - `claimDevice` - Device claiming functionality
@@ -34,11 +34,13 @@ The test suite validates the complete integration between:
 ### 🔗 Integration Tests
 - NPL Engine protocol instantiation
 - Sync Service data synchronization
-- End-to-end request routing validation
+- Service Worker request interception validation
+- End-to-end request routing through Service Worker
 
 ### ⚡ Performance Tests
-- Response time comparison (NPL vs Direct)
-- Overhead measurement
+- Service Worker overhead measurement
+- Response time comparison (Service Worker vs Direct)
+- Read-your-writes consistency performance
 - Load testing with multiple devices
 
 ## Prerequisites
